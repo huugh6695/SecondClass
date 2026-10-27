@@ -1,0 +1,76 @@
+spring:
+  # 本地开发用的真实凭据放在 config/application-local.yml —— 该文件已被 .gitignore
+  # 忽略，不会进版本库。optional: 表示文件不存在也不报错（线上走 prod profile 的
+  # 环境变量，见 application-prod.yml）。
+  config:
+    import: optional:file:./config/application-local.yml
+
+  datasource:
+    url: jdbc:mysql://localhost:3306/second_classroom?useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true
+    username: root
+    # 值来自 config/application-local.yml 或环境变量 DB_PASSWORD，代码里不再有明文密码
+    password: ${DB_PASSWORD:}
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    hikari:
+      # ⚠️ 默认 30 秒太长了。/health 要求"单项检测超时 3 秒"，
+      #    如果不改这里，数据库一挂，探活会先卡 30 秒才返回 —— 超时目标就成了空话。
+      connection-timeout: 3000
+
+  # Redis（⑧ 阶段接入）。这里是**唯一的** Redis 地址来源：
+  #   · /health 的探活走官方客户端，用的是这一份配置；
+  #   · 单号 INCR、幂等 SETNX、登出黑名单、敏感词缓存也都用这一份。
+  # 换环境（比如部署到云服务器）不用改代码，用启动参数覆盖即可：
+  #   java -jar xxx.jar --spring.data.redis.host=10.0.0.5 --spring.data.redis.password=xxx
+  data:
+    redis:
+      host: 127.0.0.1
+      port: 6379
+      # 命令超时 + 连接超时都压到 2 秒：Redis 挂了必须"很快地失败"，
+      # 否则 /health 这个探活接口自己就变成拖死监控的那个组件。
+      timeout: 2s
+      connect-timeout: 2s
+  servlet:
+    multipart:
+      # ⚠️ Spring Boot 默认单文件只有 1MB、整个请求 10MB —— 不改这两个值，
+      #    传稍大一点的图就会抛 MaxUploadSizeExceededException。
+      #    这里按设计文档 §6「文件上传接口」的 ≤5MB 设定，与下面 app.upload.max-file-size 对齐。
+      max-file-size: 5MB
+      max-request-size: 6MB
+
+# JWT 配置
+# 开发密钥放在 config/application-local.yml（不进版本库）；生产用环境变量 JWT_SECRET，
+# 且**必须**是与开发密钥不同的新随机值（见 application-prod.yml 的说明）。
+jwt:
+  secret: ${JWT_SECRET:}
+  expiration: 604800   # 秒，7 天
+
+# 异步通知派发：定时扫 t_notification_log 里 status='PENDING' 的记录去推送
+# （业务代码只写 PENDING，真发送由 NotificationDispatchService 异步做）
+app:
+  notification:
+    enabled: true                    # 总开关，本地调试想停掉定时任务就改 false
+    scan-interval-ms: 10000          # 每轮间隔：上一轮跑完再等这么久（不是固定频率）
+    initial-delay-ms: 5000           # 启动后多久跑第一轮
+    batch-size: 100                  # 单轮最多处理多少条，防止一次捞太多
+    max-retry: 3                     # 最多重试次数（首次尝试之外），加首次共 4 次
+    retry-delay-seconds: 30,60,120   # 每次重试前的等待间隔（秒），与 max-retry 一一对应
+
+  # 附件存储。文档 §6 假设文件传 OSS（路径 work-order/{yyyyMMdd}/{uuid}.jpg），
+  # 但项目没接对象存储，所以落到本地磁盘：{dir}/{yyyyMMdd}/{attachmentId}{后缀}，
+  # file_url 存下载接口地址。换真 OSS 时只需改 FileStorageService 一处。
+  upload:
+    dir: ./uploads                   # 相对项目根目录（IDEA 的工作目录就是项目根）
+    max-file-size: 5242880           # 单文件上限，字节（5MB，按文档 §6），与上面 multipart 对齐
+    # ⚠️ 文档 §6 / §1.10 只允许 jpg/jpeg/png（图片）。这里**故意放宽**成图片+PDF+Office+压缩包
+    #    （已与用户确认）：学时申诉常要传证明材料，只收图片不够用。
+    #    这是本接口与文档唯一的功能性偏差，答辩时要能解释。
+    allowed-extensions: jpg,jpeg,png,gif,bmp,webp,pdf,doc,docx,xls,xlsx,ppt,pptx,txt,zip,rar
+
+  # 健康检查（GET /health，文档 §2）。
+  health:
+    # ⑧ 阶段已接入 Redis，所以这里打开：/health 会真的 PING 一次，
+    # redis 字段报 UP/DOWN，并且 Redis 挂掉会如实把整体拉成 DOWN + HTTP 503。
+    # ⚠️ 本地调试时如果没双击启 Redis（那个黑窗口），探活会报 DOWN + 503 —— 这是**如实反映**，
+    #    不是 bug。只想看 DB 那就用启动参数临时关掉：--app.health.redis-enabled=false
+    #    （关掉后 redis 字段报 "SKIPPED"，且不拖累 status，这是接口文档之外我们保留的调试开关）。
+    redis-enabled: true

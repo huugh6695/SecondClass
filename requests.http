@@ -1,0 +1,3076 @@
+# 第二课堂系统 · 认证模块接口自测
+# 测试账号（密码统一 123456）：
+#   学生 2023001001  干事 2023002001  管理员 2023003001
+# 注意：第 1 条请求测的是"默认密码=学号后6位"，但库里密码已被重置为 123456，所以它会 401，属正常。
+# 前提：先让 Spring Boot 跑起来（IDEA 点 ▶ 运行，看到 Tomcat started on port 8080）
+
+#### 1) 登录：拿学号+密码换 Token
+POST http://localhost:8080/api/auth/login
+Content-Type: application/json
+
+{
+  "userId": "2023001001",
+  "password": "001001"
+}
+
+### 2) 获取当前用户：把第1步返回的 token 粘到 Bearer 后面
+###    例如：Authorization: Bearer eyJhbGciOi...
+GET http://localhost:8080/api/auth/me
+Authorization: Bearer <把第1步返回的 token 粘到这里>
+
+### 3) 反向验证：不带 Token 访问 /me，应当返回 401
+GET http://localhost:8080/api/auth/me
+
+### 4) 登录并自动保存 token（工单测试用）
+POST http://localhost:8080/api/auth/login
+Content-Type: application/json
+
+{
+  "userId": "2023001001",
+  "password": "123456"
+}
+
+> {%
+    client.global.set("token", response.body.data.token);
+%}
+
+### 5) 提交工单（token 自动带上，不用手粘）
+POST http://localhost:8080/api/work-orders
+Content-Type: application/json
+Authorization: Bearer {{token}}
+
+{
+  "category": "学时录入",
+  "content": "我参加了XX志愿服务活动，学时一直没有录入，麻烦帮忙核实一下，谢谢。",
+  "requestId": "test-0001",
+  "attachmentIds": []
+}
+
+### 6) 不带 token 提交工单（应当返回 401）
+POST http://localhost:8080/api/work-orders
+Content-Type: application/json
+
+{
+  "category": "学时录入",
+  "content": "无 token 测试",
+  "requestId": "test-noauth-0001",
+  "attachmentIds": []
+}
+
+### 7) 列表查询（全部，默认分页）
+GET http://localhost:8080/api/work-orders
+Authorization: Bearer {{token}}
+
+### 8) 列表查询（只看法务录入类 + 待接单）
+GET http://localhost:8080/api/work-orders?category=学时录入&status=PENDING
+Authorization: Bearer {{token}}
+
+### ⑨ 工单详情（用之前提交的 WO202609170001）
+GET http://localhost:8080/api/work-orders/WO202609170001
+Authorization: Bearer {{token}}
+
+### ⑩ 干事登录（自动存 staffToken）
+POST http://localhost:8080/api/auth/login
+Content-Type: application/json
+
+{ "userId": "2023002001", "password": "123456" }
+
+> {% client.global.set("staffToken", response.body.data.token); %}
+
+### ⑪ 干事受理工单
+POST http://localhost:8080/api/work-orders/WO202609170001/accept
+Authorization: Bearer {{staffToken}}
+Content-Type: application/json
+
+{ "version": 0 }
+
+### ⑫ 学生复查详情
+GET http://localhost:8080/api/work-orders/WO202609170001
+Authorization: Bearer {{token}}
+
+### ⑬ 学生身份受理（应 403）
+POST http://localhost:8080/api/work-orders/WO202609170001/accept
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{ "version": 0 }
+
+### ⑭ 干事回复工单
+POST http://localhost:8080/api/work-orders/WO202609170001/reply
+Authorization: Bearer {{staffToken}}
+Content-Type: application/json
+
+{
+  "content": "同学你好，你的志愿服务学时已核实，预计 3 个工作日内录入完成，请留意系统通知。",
+  "requestId": "reply-001"
+}
+
+### ⑮ 学生查看详情
+GET http://localhost:8080/api/work-orders/WO202609170001
+Authorization: Bearer {{token}}
+
+### ⑯ 学生追问
+POST http://localhost:8080/api/work-orders/WO202609170001/follow-up
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "content": "好的，谢谢！如果 3 个工作日后还没录入，我需要再联系谁呢？",
+  "requestId": "followup-001"
+}
+
+### ⑰ 干事查看详情
+GET http://localhost:8080/api/work-orders/WO202609170001
+Authorization: Bearer {{staffToken}}
+
+### ⑱ 干事手动完结
+POST http://localhost:8080/api/work-orders/WO202609170001/close
+Authorization: Bearer {{staffToken}}
+Content-Type: application/json
+
+{ "version": 3 }
+
+### ⑲ 学生提交新工单
+###     ⚠️ 这里以前**重复贴了两遍**（同一个 requestId `wo-002`、同一份内容），
+###        第二遍那段还带着 `<新单号>` 占位符。⑧③ 接上幂等之后，
+###        "同 requestId + 同参数"的第二次会变成**重放**、不会再新建一张单，
+###        留着那段就成了一条"藏着的语义陷阱"（而且占位符本来就禁止用），所以删掉了。
+POST http://localhost:8080/api/work-orders
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "category": "规则疑问",
+  "content": "请问第二课堂学时的年度上限是多少？跨学期可以累计吗？",
+  "requestId": "wo-002"
+}
+### ⑳ 干事受理新单
+POST http://localhost:8080/api/work-orders/WO202609210001/accept
+Authorization: Bearer {{staffToken}}
+Content-Type: application/json
+
+{ "version": 0 }
+
+### ㉑ 故意用过期版本关单 → 应 409 版本冲突
+POST http://localhost:8080/api/work-orders/WO202609210001/close
+Authorization: Bearer {{staffToken}}
+Content-Type: application/json
+
+{ "version": 0 }
+
+### ㉒ 干事回复 → 变成 REPLIED
+POST http://localhost:8080/api/work-orders/WO202609210001/reply
+Authorization: Bearer {{staffToken}}
+Content-Type: application/json
+
+{ "content": "同学你好，第二课堂每学年学时上限为 40 个，跨学期不可累计，请以当学年为准。", "requestId": "reply-002" }
+### ㉓ 学生确认解决 → CONFIRM 关闭
+POST http://localhost:8080/api/work-orders/WO202609210001/confirm
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{ "version": 2 }
+
+### ㉔ 管理员登录（自动存 adminToken）
+POST http://localhost:8080/api/auth/login
+Content-Type: application/json
+
+{"userId": "2023003001", "password": "123456"}
+
+> {% client.global.set("adminToken", response.body.data.token); %}
+
+### ㉕ 学生提交新工单
+POST http://localhost:8080/api/work-orders
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{"category": "其他", "content": "测试用的无效工单，稍后由管理员关闭。", "requestId": "wo-003"}
+
+### ㉖ 不传 remark → 应 400
+POST http://localhost:8080/api/work-orders/WO202609220001/admin-close
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{"version": 0}
+
+### ㉗ 管理员强制关闭
+POST http://localhost:8080/api/work-orders/WO202609220001/admin-close
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{"remark": "无效咨询，非第二课堂相关问题", "version": 0}
+
+# ==========================================================================
+#  F 阶段验证：状态日志 t_status_log + SYSTEM 系统消息 + 全局异常处理器
+#  跑之前务必：IDEA 里 Stop → Ctrl+F9 重新编译 → 重新 Run（否则跑的还是旧代码）
+#  这一段的工单号由响应处理器自动存进 {{fwo}}，不用手动抄
+#
+#  顺序很重要！状态机是 REPLIED 才能确认，而"追问"会把 REPLIED 打回 PROCESSING，
+#  所以正确链路是：提交 → 受理 → 回复 → 追问 → 再回复 → 确认。
+#  version 推演：       0     1      2      3       4       5(终态CLOSED)
+# ==========================================================================
+
+### F1 学生提交新工单 → 应写 1 条 SUBMIT 日志、**不发** SYSTEM 消息 → 自动存 fwo
+POST http://localhost:8080/api/work-orders
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{"category": "活动咨询", "content": "F阶段测试单：请问志愿者活动的学时什么时候公示？", "requestId": "f-001"}
+
+> {% client.global.set("fwo", response.body.data.workOrderId); %}
+
+### F2 干事受理 → 应写 ACCEPT 日志 + 1 条 SYSTEM 消息「测试干事 已接单」
+POST http://localhost:8080/api/work-orders/{{fwo}}/accept
+Authorization: Bearer {{staffToken}}
+Content-Type: application/json
+
+{ "version": 0 }
+
+### F3 干事回复 → 应写 REPLY 日志、**不发** SYSTEM 消息（回复内容本身就是消息）
+POST http://localhost:8080/api/work-orders/{{fwo}}/reply
+Authorization: Bearer {{staffToken}}
+Content-Type: application/json
+
+{"content": "同学你好，本学期志愿者学时统一在第 16 周公示，请留意公告。", "requestId": "f-002"}
+
+### F4 学生追问 → 应写 FOLLOW_UP 日志、**不发** SYSTEM 消息；状态被拉回 PROCESSING
+POST http://localhost:8080/api/work-orders/{{fwo}}/follow-up
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{"content": "好的，那如果第 16 周还没公示我该找谁？", "requestId": "f-003"}
+
+### F4b 这步故意确认 → 应 409「只有已回复的工单才能确认解决」（证明状态门前置生效）
+POST http://localhost:8080/api/work-orders/{{fwo}}/confirm
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{ "version": 3 }
+
+### F5 干事再次回复 → PROCESSING 回到 REPLIED；这条日志的 before 也应是 PROCESSING
+POST http://localhost:8080/api/work-orders/{{fwo}}/reply
+Authorization: Bearer {{staffToken}}
+Content-Type: application/json
+
+{"content": "可以找第二课堂管理委员会办公室（学工楼 205），或在本系统再提交一条工单。", "requestId": "f-004"}
+
+### F6 学生确认解决 → 应写 CONFIRM 日志 + 1 条 SYSTEM 消息，终态 CLOSED
+POST http://localhost:8080/api/work-orders/{{fwo}}/confirm
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{ "version": 4 }
+
+### F7 看时间线：QUESTION / 系统·已接单 / REPLY / FOLLOW_UP / REPLY / 系统·确认解决
+GET http://localhost:8080/api/work-orders/{{fwo}}
+Authorization: Bearer {{token}}
+
+### F8 查日志链（在 MySQL 里执行）
+#   USE second_classroom;
+#   SELECT log_id, before_status, after_status, action, operator_name, operator_role
+#     FROM t_status_log WHERE work_order_id='<你的fwo>' ORDER BY operation_time;
+#   期望 6 行：SUBMIT(NULL→PENDING) / ACCEPT(PENDING→PROCESSING) / REPLY(PROCESSING→REPLIED)
+#             / FOLLOW_UP(REPLIED→PROCESSING) / REPLY(PROCESSING→REPLIED) / CONFIRM(REPLIED→CLOSED)
+
+# ---------- 以下是全局异常处理器验证 ----------
+
+### F9 ①访问不存在的接口 → {"code":404,"message":"接口不存在"}
+GET http://localhost:8080/api/work-orders/{{fwo}}/no-such-path
+Authorization: Bearer {{token}}
+
+### F10 ②坏 JSON（少了右花括号）→ code 400「请求体格式错误」，不再出现 Spring 默认错误页
+POST http://localhost:8080/api/work-orders
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{"category": "学时录入", "content": "坏JSON测试"
+
+### F11 ③详情接口只认 GET，这里故意用 POST → code 405「请求方法不支持：POST」
+POST http://localhost:8080/api/work-orders/{{fwo}}
+Authorization: Bearer {{token}}
+
+### F12 ④page 传非数字 → code 400「参数类型错误：page」
+GET http://localhost:8080/api/work-orders?page=abc
+Authorization: Bearer {{token}}
+
+### F13 ⑤requestId 塞 100 个字符（列宽只有 64）→ code 500「数据库操作失败」，后端日志打全栈、事务回滚
+POST http://localhost:8080/api/work-orders
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{"category": "其他", "content": "数据库异常测试", "requestId": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"}
+
+### F14 反向确认：不带 Token 访问 → 仍是拦截器写的 401，没被全局处理器劫持
+GET http://localhost:8080/api/work-orders
+
+# ==========================================================================
+#  G 阶段验证：合并工单（POST /api/work-orders/{id}/merge）
+#  跑之前务必：IDEA 里 Stop → Ctrl+F9 重新编译 → 重新 Run
+#  mainOrderId = 主工单（保留），URL 里的 {id} = 子工单（变 MERGED 终态）
+#  两个单号由响应处理器自动存进 {{gmain}} / {{gsub}}，不用手抄
+#
+#  ⚠️ 注意校验顺序（和文档一致）：角色 → 不能合并自己 → 查操作人 → 加锁两行
+#     → 权限 → 子单状态 → 防重复四条 → 乐观锁 → 写关系/日志/消息
+#     所以"子单已 MERGED 时再合并"用干事会先被【权限门】拦成 403，
+#     想验到【状态门】的 409 得用管理员身份。
+# ==========================================================================
+
+### G1 学生提交"主单"→ 自动存 gmain
+POST http://localhost:8080/api/work-orders
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{"category": "学时录入", "content": "G阶段主单：志愿服务学时未录入", "requestId": "g-main-001"}
+
+> {% client.global.set("gmain", response.body.data.workOrderId); %}
+
+### G2 学生提交"重复单"→ 自动存 gsub
+POST http://localhost:8080/api/work-orders
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{"category": "学时录入", "content": "G阶段重复单：志愿服务学时一直没录入（与上一单重复）", "requestId": "g-sub-001"}
+
+> {% client.global.set("gsub", response.body.data.workOrderId); %}
+
+### G2b 学生提交第三张单（专门留给 G10 验版本冲突用）→ 自动存 gthird
+POST http://localhost:8080/api/work-orders
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{"category": "其他", "content": "G阶段第三单：留着测版本冲突", "requestId": "g-third-001"}
+
+> {% client.global.set("gthird", response.body.data.workOrderId); %}
+
+### G3 干事合并：子单 {{gsub}} → 主单 {{gmain}} ★核心场景
+###    期望 data：status=MERGED、mainOrderId={{gmain}}、mergeId=MRG开头、version=1
+POST http://localhost:8080/api/work-orders/{{gsub}}/merge
+Authorization: Bearer {{staffToken}}
+Content-Type: application/json
+
+{"mainOrderId": "{{gmain}}", "version": 0}
+
+### G4 查子单详情 → 应看到 status=MERGED、mainOrderId={{gmain}}（前端据此跳转主单）
+GET http://localhost:8080/api/work-orders/{{gsub}}
+Authorization: Bearer {{token}}
+
+### G5 查主单详情 → 时间线应有一条 SYSTEM「工单 {{gsub}} 已合并至此」
+GET http://localhost:8080/api/work-orders/{{gmain}}
+Authorization: Bearer {{token}}
+
+### G6 不能合并自己 → 期望 400 WO_CANNOT_MERGE_SELF
+POST http://localhost:8080/api/work-orders/{{gmain}}/merge
+Authorization: Bearer {{staffToken}}
+Content-Type: application/json
+
+{"mainOrderId": "{{gmain}}", "version": 0}
+
+### G7 干事重复合并子单 → 期望 403（权限门先拦：子单已 MERGED，干事无处置权）
+POST http://localhost:8080/api/work-orders/{{gsub}}/merge
+Authorization: Bearer {{staffToken}}
+Content-Type: application/json
+
+{"mainOrderId": "{{gmain}}", "version": 1}
+
+### G8 管理员重复合并同一子单 → 期望 409 WO_STATUS_INVALID（绕过权限门后才走到状态门）
+POST http://localhost:8080/api/work-orders/{{gsub}}/merge
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{"mainOrderId": "{{gmain}}", "version": 1}
+
+### G9 学生身份合并 → 期望 403 仅干事或管理员可合并工单
+POST http://localhost:8080/api/work-orders/{{gmain}}/merge
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{"mainOrderId": "{{gsub}}", "version": 0}
+
+### G10 版本冲突：子单 {{gmain}} 真实版本是 0，故意传 99 → 期望 409 WO_VERSION_CONFLICT
+###     前面的权限/状态/防重复校验都会通过，只有乐观锁那一步 UPDATE 影响 0 行
+###     （用 {{gthird}} 当主单，它是一张干净的 PENDING 单）
+POST http://localhost:8080/api/work-orders/{{gmain}}/merge
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{"mainOrderId": "{{gthird}}", "version": 99}
+
+### G11 主工单不存在 → 期望 404 工单不存在
+POST http://localhost:8080/api/work-orders/{{gmain}}/merge
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{"mainOrderId": "WO999999999999", "version": 0}
+
+### G12 缺 mainOrderId → 期望 400 缺少 mainOrderId 参数
+POST http://localhost:8080/api/work-orders/{{gmain}}/merge
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{"version": 0}
+
+### G12b 缺 version → 期望 400 缺少 version 参数
+POST http://localhost:8080/api/work-orders/{{gmain}}/merge
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{"mainOrderId": "{{gthird}}"}
+
+### G13 已合并子单全程只读：追问 → 期望 409（回复/受理同样会被拦）
+POST http://localhost:8080/api/work-orders/{{gsub}}/follow-up
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{"content": "试图追问已合并的单", "requestId": "g-x-001"}
+
+### G14 查库核对（MySQL 里执行）
+#   USE second_classroom;
+#   SELECT * FROM t_merge_relation ORDER BY merge_time;                    -- 每次合并 1 行
+#   SELECT * FROM t_status_log WHERE action='MERGE';                       -- 应 before=PENDING, after=MERGED
+#   SELECT work_order_id, message_id, content FROM t_work_order_message
+#     WHERE content LIKE '%合并%' ORDER BY create_time;                    -- 每次合并 2 条：子单1条 + 主单1条
+#   SELECT work_order_id, status, main_order_id, version FROM t_work_order; -- 主单 main_order_id 仍为 NULL
+
+# ==========================================================================
+#  H 阶段验证：通知记录 t_notification_log
+#  设计要点：业务事务里只 INSERT 一条 status='PENDING' 的通知，**不在这里真发送**。
+#  文档原话："工单业务成功不以通知发送成功为前提" —— 通知归异步服务去推送。
+#  所以现在还没有"通知列表"接口，验证方式是查库。通知接口（/api/notifications）是下一步。
+#
+#  收件人规则（文档 1.5.2）：
+#    NEW_TICKET → 所有 STAFF/ADMIN      ACCEPT/REPLY → 工单提交人
+#    FOLLOW_UP  → 负责干事               CLOSE → "对方"（学生确认→干事，干事关闭→学生）
+#    MERGE      → 子工单提交人，且 targetId 指向**主工单**
+# ==========================================================================
+
+### H1 学生提交新工单 → 通知表应新增 2 条 NEW_TICKET（测试库有 1 干事 + 1 管理员）
+POST http://localhost:8080/api/work-orders
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{"category": "学时录入", "content": "H阶段通知测试单", "requestId": "h-001"}
+
+> {% client.global.set("hwo", response.body.data.workOrderId); %}
+
+### H2 干事受理 → 应新增 1 条 ACCEPT，收件人=工单提交人
+POST http://localhost:8080/api/work-orders/{{hwo}}/accept
+Authorization: Bearer {{staffToken}}
+Content-Type: application/json
+
+{ "version": 0 }
+
+### H3 干事回复 → 应新增 1 条 REPLY，收件人=工单提交人
+POST http://localhost:8080/api/work-orders/{{hwo}}/reply
+Authorization: Bearer {{staffToken}}
+Content-Type: application/json
+
+{"content": "已收到，3 个工作日内处理。", "requestId": "h-r1"}
+
+### H4 学生追问 → 应新增 1 条 FOLLOW_UP，收件人=负责干事
+POST http://localhost:8080/api/work-orders/{{hwo}}/follow-up
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{"content": "好的，那我等通知。", "requestId": "h-f1"}
+
+### H5 干事再回复 → 应新增 1 条 REPLY
+POST http://localhost:8080/api/work-orders/{{hwo}}/reply
+Authorization: Bearer {{staffToken}}
+Content-Type: application/json
+
+{"content": "已处理完成。", "requestId": "h-r2"}
+
+### H6 学生确认解决 → 应新增 1 条 CLOSE，收件人=负责干事（"通知对方"）
+POST http://localhost:8080/api/work-orders/{{hwo}}/confirm
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{ "version": 4 }
+
+### H7 造两张新单做合并测试 → 自动存 hmain / hsub
+POST http://localhost:8080/api/work-orders
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{"category": "活动咨询", "content": "H阶段合并主单", "requestId": "h-m1"}
+
+> {% client.global.set("hmain", response.body.data.workOrderId); %}
+
+### H8 提交"重复单"
+POST http://localhost:8080/api/work-orders
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{"category": "活动咨询", "content": "H阶段合并子单（重复）", "requestId": "h-m2"}
+
+> {% client.global.set("hsub", response.body.data.workOrderId); %}
+
+### H9 干事合并 → 应新增 1 条 MERGE，收件人=子单提交人，targetId={{hmain}}（跳主单）
+POST http://localhost:8080/api/work-orders/{{hsub}}/merge
+Authorization: Bearer {{staffToken}}
+Content-Type: application/json
+
+{"mainOrderId": "{{hmain}}", "version": 0}
+
+### H10 查库核对（MySQL 里执行）
+#   USE second_classroom;
+#   -- 按单看通知：每条业务动作对应的收件人/标题/跳转目标
+#   SELECT notify_id, work_order_id, user_id, type, title, LEFT(content,24) AS content,
+#          channel, priority, target_type, target_id, status, is_read
+#     FROM t_notification_log
+#    WHERE work_order_id = '<你的hwo>'
+#    ORDER BY notify_id;
+#
+#   -- 期望（按顺序）：
+#   --   1 条 NEW_TICKET ×2（干事+管理员，priority=P0，title='新工单: 学时录入'）
+#   --   1 条 ACCEPT    → 2023001001（学生）
+#   --   2 条 REPLY     → 2023001001（学生），content = '测试干事: 回复正文'
+#   --   1 条 FOLLOW_UP → 2023002001（干事）
+#   --   1 条 CLOSE     → 2023002001（干事），title='学生已确认解决'
+#   -- 合并那条单独看：
+#   SELECT work_order_id AS 所属子单, user_id AS 收件人, type, title, target_id AS 点击跳转
+#     FROM t_notification_log WHERE type='MERGE';
+#   -- 期望：所属子单=<hsub>、收件人=学生、target_id=<hmain>（跳主单而不是只读的子单）
+#
+#   -- 所有通知写完后 status 都应是 PENDING、is_read 都应是 0（等异步通知服务消费）：
+#   SELECT status, is_read, COUNT(*) FROM t_notification_log GROUP BY status, is_read;
+
+# ==========================================================================
+#  I 阶段验证：通知中心接口 + 两种红点
+#
+#  系统里有**两种独立红点**，别搞混：
+#    ① 通知红点 t_notification_log.is_read → GET /api/notifications/unread-count
+#    ② 消息红点 t_message_read 有没有记录    → GET /api/messages/unread-count
+#  而 POST /api/work-orders/{id}/messages/read 会在**同一事务**里同时清掉两种，
+#  否则用户会看到"消息都读了、通知列表还有红点"。
+#
+#  跑之前务必：IDEA 里 Stop → Ctrl+F9 → Run
+# ==========================================================================
+
+### I1 干事查自己的通知列表（GET /api/notifications）
+###    期望 data：total / page / pageSize / list[]，每条含 notifyId、type、title、content、
+###    targetType、targetId、isRead、createTime（和文档通知列表示例的字段完全一致）
+GET http://localhost:8080/api/notifications
+Authorization: Bearer {{staffToken}}
+
+### I2 只看未读 → 加 isRead=false
+GET http://localhost:8080/api/notifications?isRead=false
+Authorization: Bearer {{staffToken}}
+
+### I3 只看已读 → 加 isRead=true
+GET http://localhost:8080/api/notifications?isRead=true
+Authorization: Bearer {{staffToken}}
+
+### I4 分页：每页 2 条，第 2 页
+GET http://localhost:8080/api/notifications?page=2&pageSize=2
+Authorization: Bearer {{staffToken}}
+
+### I5 未读通知数（前端红点，15 秒轮询）→ {"unreadCount": N}
+GET http://localhost:8080/api/notifications/unread-count
+Authorization: Bearer {{staffToken}}
+
+### I6 单条已读：把上一步列表里的某个 notifyId 填进来 → 期望 markedCount=1
+###    （对已读的再点一次也返回 1：SET read_time=NOW() 确实刷新了时间戳，重复调用是幂等的）
+POST http://localhost:8080/api/notifications/NOT20260922000003/read
+Authorization: Bearer {{staffToken}}
+
+### I7 标别人的通知 → 期望 404「通知不存在或不属于你」
+###    （用 studentToken 去标一条属于干事/管理员的通知；不用 403 是为了不暴露"这条通知存在"）
+POST http://localhost:8080/api/notifications/NOT20260922000002/read
+Authorization: Bearer {{token}}
+
+### I8 不存在的通知号 → 期望 404
+POST http://localhost:8080/api/notifications/NOT99999999999999/read
+Authorization: Bearer {{staffToken}}
+
+### I9 全部标记已读 → 期望 markedCount=当前未读数；再点一次应为 0
+POST http://localhost:8080/api/notifications/read-all
+Authorization: Bearer {{staffToken}}
+
+### I10 未读消息数（另一个红点）→ {"unreadCount": N}
+###     统计口径：我能看到的单 + 不是我发的消息；**系统消息（sender_id 为 NULL）也算未读**
+GET http://localhost:8080/api/messages/unread-count
+Authorization: Bearer {{token}}
+
+### I11 把某张单的消息全部标已读 → 同时清两种红点
+###     期望：messageCount = 该单消息总数；notificationCount = 我在该单的未读通知数
+POST http://localhost:8080/api/work-orders/{{hwo}}/messages/read
+Authorization: Bearer {{token}}
+
+### I12 再调一次 → 期望 messageCount=0 且 notificationCount=0（INSERT IGNORE 幂等）
+POST http://localhost:8080/api/work-orders/{{hwo}}/messages/read
+Authorization: Bearer {{token}}
+
+### I13 干事读「已 MERGED 且无 handler」的单 → 期望 403（权限同工单详情）
+POST http://localhost:8080/api/work-orders/WO202609220004/messages/read
+Authorization: Bearer {{staffToken}}
+
+### I14 不存在的工单 → 期望 404
+POST http://localhost:8080/api/work-orders/WO999999999999/messages/read
+Authorization: Bearer {{staffToken}}
+
+### I15 三个接口都不带 Token → 期望都是 401
+GET http://localhost:8080/api/notifications/unread-count
+
+### I16
+GET http://localhost:8080/api/messages/unread-count
+
+### I17
+GET http://localhost:8080/api/notifications
+
+### I18 查库核对（MySQL 里执行）
+#   USE second_classroom;
+#   -- 两种红点是否被同事务一起清掉
+#   SELECT notify_id, type, is_read, read_time FROM t_notification_log
+#    WHERE work_order_id='<你的hwo>' AND user_id='2023001001';
+#   SELECT COUNT(*) FROM t_message_read WHERE user_id='2023001001';
+#
+#   -- ⚠️ 想用 SQL 手工复算未读消息数时，**不要用 SET @u='...' 定义变量**：
+#   --    变量的排序规则是连接默认的 utf8mb4_0900_ai_ci，而表列是 utf8mb4_unicode_ci，
+#   --    比较时会报 "Illegal mix of collations"。直接把字符串字面量写进 SQL 即可。
+#   --    （Java 代码走参数绑定，没有这个问题）
+
+# ============================================================
+# J 阶段：操作审计日志 t_operation_log
+# ============================================================
+#
+# 表长这样（schema.sql）：
+#   log_id            OLOG+yyyyMMdd+6位
+#   user_id / user_name / user_role   操作人（从 Token 取 userId，姓名角色查库/业务里带）
+#   operation_type    操作类型：LOGIN / LOGOUT / CHANGE_PASSWORD /
+#                     SUBMIT / ACCEPT / REPLY / FOLLOW_UP / CONFIRM /
+#                     MANUAL_CLOSE / ADMIN_CLOSE / MERGE
+#                     （再次咨询用 RE_CONSULTATION，暂未实现）
+#   target_type       操作对象类型：USER / WORK_ORDER
+#   target_id         操作对象 ID
+#   operation_content 一句话描述
+#   ip_address        来源 IP（IPv6 也放得下，VARCHAR(45)）
+#   operation_time    默认 CURRENT_TIMESTAMP
+#
+# ⚠️ 本文件里的 User-Agent 客户端跑在 8080（你的 IDEA 实例）。
+#    如果你还没重启过 IDEA 里的服务，先停掉 → Ctrl+F9 重编译 → 再启动，否则跑的是旧代码。
+#
+# ⚠️ J8b 会真的改掉学生密码，**跑完必须执行 J8d 的还原 SQL**，否则后续所有 requests.http 都会 401。
+
+### J0 跑之前先看一眼基线（MySQL 里执行）
+#   USE second_classroom;
+#   SELECT COUNT(*) AS before_cnt FROM t_operation_log;
+
+### J1 学生登录 → 应产生 1 条 LOGIN
+# @name j01
+POST http://localhost:8080/api/auth/login
+Content-Type: application/json
+
+{
+  "userId": "2023001001",
+  "password": "123456"
+}
+
+> {% client.global.set("token", response.body.data.token); %}
+
+### J2 用错误密码登录 → 应返回 401，且**不留下任何审计行**
+###    审计日志是用来查"谁干了什么"的，登录失败不算一次成功操作，不记 LOGIN
+POST http://localhost:8080/api/auth/login
+Content-Type: application/json
+
+{
+  "userId": "2023001001",
+  "password": "wrong-password"
+}
+
+### J3 学生提交工单 → 应产生 1 条 SUBMIT（target_type=WORK_ORDER）
+# @name j03
+POST http://localhost:8080/api/work-orders
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "category": "学时录入",
+  "content": "J阶段审计日志验证用单",
+  "requestId": "j-audit-demo-001"
+}
+
+> {% client.global.set("jwo", response.body.data.workOrderId); %}
+
+### J3b 再提交一次同样的 requestId（内容也一样）→ 应 code=0「幂等重放」
+###     ⑧③ 起：首次成功的结果存在 Redis 里（idempotent:{requestId}:result，1 小时），
+###     重试直接原样还回来，**不再报 409** —— 因为第一次其实成功了，用户要的是那张单。
+###     要点：**不产生第二条 SUBMIT 审计行**（重放不是"又提交了一次"）。
+POST http://localhost:8080/api/work-orders
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "category": "学时录入",
+  "content": "J阶段审计日志验证用单",
+  "requestId": "j-audit-demo-001"
+}
+
+### J4 干事登录（拿 staffToken）
+# @name j04
+POST http://localhost:8080/api/auth/login
+Content-Type: application/json
+
+{
+  "userId": "2023002001",
+  "password": "123456"
+}
+
+> {% client.global.set("staffToken", response.body.data.token); %}
+
+### J5 干事受理 → 应产生 1 条 ACCEPT
+POST http://localhost:8080/api/work-orders/{{jwo}}/accept
+Authorization: Bearer {{staffToken}}
+Content-Type: application/json
+
+{
+  "version": 0
+}
+
+### J6 干事回复 → 应产生 1 条 REPLY
+POST http://localhost:8080/api/work-orders/{{jwo}}/reply
+Authorization: Bearer {{staffToken}}
+Content-Type: application/json
+
+{
+  "content": "已核实学时记录，会尽快补录",
+  "requestId": "j-audit-demo-002",
+  "version": 1
+}
+
+### J6b 同一 requestId 但**内容不同**再回复一次 → 409 IDEMPOTENCY_CONFLICT
+###     ⑧③ 起：requestId 相同、参数却不同 ⇒ 这不是"同一次请求的重试"，
+###     而是前端复用了 ID 的 bug，必须拒绝（不能把上次的结果塞给它）。
+###     ⚠️ 若 Redis 里那条结果缓存已过期/被清掉，则会退到数据库 UNIQUE 兜底，
+###        同样返回 409（消息是「请勿重复提交」）—— 两种情形都是 409，这条断言都成立。
+###     要点：**不产生第二条 REPLY 审计行**。
+POST http://localhost:8080/api/work-orders/{{jwo}}/reply
+Authorization: Bearer {{staffToken}}
+Content-Type: application/json
+
+{
+  "content": "重复回复",
+  "requestId": "j-audit-demo-002",
+  "version": 2
+}
+
+### J7 学生登出 → 应产生 1 条 LOGOUT
+###    ⚠️ 注意：登出后这个 token 立刻进黑名单，后面再拿它调接口会 401
+POST http://localhost:8080/api/auth/logout
+Authorization: Bearer {{token}}
+
+### J8 改密码 → 应产生 1 条 CHANGE_PASSWORD
+###    先重新登录拿一个新 token（旧的已经被 J7 拉黑了）
+# @name j08
+POST http://localhost:8080/api/auth/login
+Content-Type: application/json
+
+{
+  "userId": "2023001001",
+  "password": "123456"
+}
+
+> {% client.global.set("token", response.body.data.token); %}
+
+### J8b 把 123456 改成 Jtest123（必须同时含字母和数字，6-20 位）
+PUT http://localhost:8080/api/auth/password
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "oldPassword": "123456",
+  "newPassword": "Jtest123"
+}
+
+### J8c 用旧密码登录 → 应 401（证明真的改了）
+POST http://localhost:8080/api/auth/login
+Content-Type: application/json
+
+{
+  "userId": "2023001001",
+  "password": "123456"
+}
+
+### ⚠️⚠️ J8d 还原密码（在 MySQL 里执行，必须跑！）
+###   为什么不能用接口改回来：新密码规则要求"同时含字母和数字"，
+###   而 123456 全是数字，压根过不了校验，只能直接从数据库把哈希写回去。
+#   USE second_classroom;
+#   UPDATE t_user SET password='$2a$10$MYD8338x8UBTV6Uxpbm0z.H4NysTsPPeBxZUkWT1qiswrLErea8ie'
+#    WHERE user_id='2023001001';
+
+### J8e 确认还原成功 → 应重新能登录
+POST http://localhost:8080/api/auth/login
+Content-Type: application/json
+
+{
+  "userId": "2023001001",
+  "password": "123456"
+}
+
+### J9 伪造代理头，验证 ip_address 取值优先级
+###    J9a：X-Forwarded-For 有多个 → 取第一个（真实客户端），不是代理
+POST http://localhost:8080/api/auth/login
+Content-Type: application/json
+X-Forwarded-For: 203.0.113.9, 10.0.0.1
+
+{
+  "userId": "2023002001",
+  "password": "123456"
+}
+
+### J9b：X-Forwarded-For 是占位垃圾值 unknown → 应自动降级用 remoteAddr
+POST http://localhost:8080/api/auth/login
+Content-Type: application/json
+X-Forwarded-For: unknown
+
+{
+  "userId": "2023002001",
+  "password": "123456"
+}
+
+### J9c：只有 X-Real-IP（Nginx 常用头）→ 应记 198.51.100.7
+POST http://localhost:8080/api/auth/login
+Content-Type: application/json
+X-Real-IP: 198.51.100.7
+
+{
+  "userId": "2023002001",
+  "password": "123456"
+}
+
+### J10 查库核对（MySQL 里执行）
+#   USE second_classroom;
+#   -- 全部审计行，看是不是每一步都只有一条、失败的都没留痕
+#   SELECT log_id, user_id, user_name, user_role, operation_type,
+#          target_type, target_id, operation_content, ip_address, operation_time
+#     FROM t_operation_log ORDER BY log_id;
+#
+#   -- 按操作类型汇总
+#   SELECT operation_type, COUNT(*) AS cnt FROM t_operation_log
+#    GROUP BY operation_type ORDER BY cnt DESC;
+#
+#   -- 查某个人的操作历史（走 idx_user_time 索引）
+#   SELECT * FROM t_operation_log
+#    WHERE user_id='2023001001' ORDER BY operation_time DESC;
+#
+#   -- 查某张工单被谁动过（走 idx_target 索引）
+#   SELECT operation_type, user_name, operation_time FROM t_operation_log
+#    WHERE target_type='WORK_ORDER' AND target_id='<换成你的工单号>'
+#    ORDER BY operation_time;
+#
+#   -- 本次验证后想清空重来：
+#   -- TRUNCATE TABLE t_operation_log;
+
+### J11 审计覆盖范围：文档只写了 3 处，实际做了 8 处
+###   api-design.html 里，工单模块**只**在 SUBMIT / ACCEPT / REPLY 三处写了
+###   INSERT t_operation_log，下面 5 个动作一个字都没提。因为审计日志漏掉
+###   "谁关的单、谁合并的"就是残缺的，所以**已按完整审计补齐**：
+###
+###     已埋点（8 个）：
+###       SUBMIT / ACCEPT / REPLY        ← 文档原有
+###       FOLLOW_UP / CONFIRM / MANUAL_CLOSE / ADMIN_CLOSE / MERGE   ← 补齐
+###     认证模块（3 个）：LOGIN / LOGOUT / CHANGE_PASSWORD
+###
+###   ⚠️ MERGE 的操作人必须取**执行合并的人**（Token 里的 userId/userType），
+###      不能拿子工单提交人 subOwnerId 顶上 —— 那个在第 16 步只是"收通知的人"。
+###      "管理员/干事帮学生合并"时两者完全不同，写反了审计就变成"学生自己合并的"。
+###
+###   ⚠️ 关闭三入口共用 closeOrder，审计的 operationType 直接复用 action
+###      （CONFIRM / MANUAL_CLOSE / ADMIN_CLOSE），一行代码全覆盖。
+###
+###   ⚠️ 再次咨询（re-consult）的 operationType 用 `RE_CONSULTATION`（已实现，见 L 阶段），
+###      **不要复用 SUBMIT** —— 要与 t_work_order.relation_type='RE_CONSULTATION' 对齐，
+###      这样才能 GROUP BY operation_type 统计出"再次咨询占比"；
+###      复用 SUBMIT 会把"首次提问"和"老问题又来了"混成一堆，指标永远算不出来。
+###      注意别和 t_status_log.action 搞混：那张表 action 是 ENUM，没有 RE_CONSULTATION，
+###      再次咨询的状态日志仍然写 'SUBMIT'。
+
+### J12 补充验证：5 个新埋点 + 失败路径不留痕（MySQL 里核对）
+#   USE second_classroom;
+#   -- 一次跑完 追问/确认/手动完结/管理员关闭/合并，然后看这 4 张单的审计轨迹：
+#   SELECT operation_type, user_name, user_role, target_id, operation_content
+#     FROM t_operation_log WHERE target_type='WORK_ORDER'
+#    ORDER BY log_id DESC LIMIT 15;
+#
+#   -- 重点看 MERGE 那行：user_name 应该是**执行合并的干事/管理员**，
+#   -- 而不是子工单的提交人（可用 t_work_order.user_name 对照）
+#   SELECT t.work_order_id, t.user_name AS 提交人, o.user_name AS 合并操作人
+#     FROM t_work_order t JOIN t_operation_log o ON o.target_id = t.work_order_id
+#    WHERE o.operation_type='MERGE';
+#
+#   -- 失败路径不留痕：连续触发 409/403 后，审计总数只应该增加"登录"那几条
+#   SELECT COUNT(*) FROM t_operation_log;
+
+# ============================================================
+# K 阶段：退回工单 POST /api/work-orders/:id/return
+# ============================================================
+#
+# 干事接了单之后，发现这单不该自己处理（分类不对、要转别的部门），
+# 把它丢回**待接单池**，让下一个干事重新受理。
+#
+# 和"关闭"的本质区别（别混）：
+#   · 关闭 close    → 终态 CLOSED，这单结束了
+#   · 退回 return   → 回到 PENDING，这单还活着，只是换人处理
+# 所以退回**不写 finish_time**，还要把 handler_id / handler_name 一起清空 ——
+# 否则单子回到待接单池却还挂着原负责人，列表里会显示成"已被受理"。
+#
+# 谁能调：该单负责人 或 ADMIN（STAFF 只能退自己负责的）
+# 前置状态：必须 PROCESSING（REPLIED 不行 —— 结果都给出去了，要反悔得走别的流程）
+# 请求体：{"remark": "退回原因（选填）", "version": N}    version 必传
+#
+# ⚠️ 校验顺序仍是「角色 → 归属 → 状态 → 乐观锁」。副作用：退了之后 handler_id 变 NULL，
+#    原来那个干事再点就变 403（不再是他负责了）而不是 409。想验证状态门的 409 要用 ADMIN 身份。
+
+### K1 学生提交一张新单（拿 kwo）
+POST http://localhost:8080/api/work-orders
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "category": "学时录入",
+  "content": "K阶段退回功能验证单",
+  "requestId": "k-return-demo-1"
+}
+
+> {% client.global.set("kwo", response.body.data.workOrderId); %}
+
+### K2 干事受理 → 状态变 PROCESSING、version 0→1、handler 变成本人
+POST http://localhost:8080/api/work-orders/{{kwo}}/accept
+Authorization: Bearer {{staffToken}}
+Content-Type: application/json
+
+{
+  "version": 0
+}
+
+### K3 干事退回 → 应 code=0，data.status=PENDING、version=2
+###    然后查库确认 handler_id / handler_name 都变成 NULL 了
+POST http://localhost:8080/api/work-orders/{{kwo}}/return
+Authorization: Bearer {{staffToken}}
+Content-Type: application/json
+
+{
+  "remark": "分类不对，应转活动咨询",
+  "version": 1
+}
+
+### K4 退回后能被重新受理（证明真的回到待接单池了）→ 应 code=0
+POST http://localhost:8080/api/work-orders/{{kwo}}/accept
+Authorization: Bearer {{staffToken}}
+Content-Type: application/json
+
+{
+  "version": 2
+}
+
+### K5 版本冲突 → 应 409 WO_VERSION_CONFLICT（传个过期 version）
+POST http://localhost:8080/api/work-orders/{{kwo}}/return
+Authorization: Bearer {{staffToken}}
+Content-Type: application/json
+
+{
+  "version": 0
+}
+
+### K6 缺 version → 应 400「缺少 version 参数」
+POST http://localhost:8080/api/work-orders/{{kwo}}/return
+Authorization: Bearer {{staffToken}}
+Content-Type: application/json
+
+{
+  "remark": "只写了原因没写版本号"
+}
+
+### K7 不存在的工单 → 应 404「工单不存在」
+POST http://localhost:8080/api/work-orders/WO999999999999/return
+Authorization: Bearer {{staffToken}}
+Content-Type: application/json
+
+{
+  "version": 0
+}
+
+### K8 学生想退回 → 应 403「仅负责人或管理员可退回工单」
+POST http://localhost:8080/api/work-orders/{{kwo}}/return
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "version": 3
+}
+
+### K9 干事正常退回（不填 remark 也行）→ 应 code=0，data.remark=null
+POST http://localhost:8080/api/work-orders/{{kwo}}/return
+Authorization: Bearer {{staffToken}}
+Content-Type: application/json
+
+{
+  "version": 3
+}
+
+### K10 对已 PENDING 的单再退回 → 干事会拿到 403（handler 已清空，不再是他负责）
+POST http://localhost:8080/api/work-orders/{{kwo}}/return
+Authorization: Bearer {{staffToken}}
+Content-Type: application/json
+
+{
+  "version": 4
+}
+
+### K11 换 ADMIN 身份同一张单 → 这时才碰到状态门，应 409「只有处理中的工单才能退回」
+POST http://localhost:8080/api/work-orders/{{kwo}}/return
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{
+  "version": 4
+}
+
+### K12 查库核对（MySQL 里执行）
+#   USE second_classroom;
+#   -- 状态轨迹：应是 SUBMIT → ACCEPT → RETURN → ACCEPT → RETURN
+#   SELECT action, before_status, after_status, operator_name, operator_role, remark
+#     FROM t_status_log WHERE work_order_id='<换成你的kwo>' ORDER BY log_id;
+#
+#   -- 退回后 handler 必须为空，否则单子会"卡"在原负责人身上
+#   SELECT work_order_id, status, handler_id, handler_name, version
+#     FROM t_work_order WHERE work_order_id='<换成你的kwo>';
+#
+#   -- 时间线：每次退回都应有一条 SYSTEM 消息「XXX 退回工单: 原因」
+#   SELECT msg_type, sender_name, content
+#     FROM t_work_order_message WHERE work_order_id='<换成你的kwo>' ORDER BY message_id;
+#
+#   -- 审计：RETURN 两行，user_name 是执行退回的人
+#   SELECT operation_type, user_name, user_role, operation_content
+#     FROM t_operation_log WHERE target_id='<换成你的kwo>' ORDER BY log_id;
+
+### K13 两点说明（文档缺口 / 已知取舍）
+###   1. 退回**不写通知**（t_notification_log）。
+###      文档的 return 流程里没有这一步，而且 t_notification_log.type 的 ENUM 是
+###      NEW_TICKET/ACCEPT/REPLY/FOLLOW_UP/CLOSE/MERGE/PENDING_REMIND/EXCEPTION ——
+###      压根没有 RETURN 这个值，想发通知就得改表结构，所以按文档保持不发。
+###      副作用：单子回到池子里，其他干事不会收到提醒，只能自己刷列表看到。
+###   2. 退回也**不动** staff_unread_count / student_unread_count（文档没写）。
+###   3. SYSTEM 消息里的名字用的是**执行人**（文档原文写的是 :handlerName）。
+###      干事自己退回时两者是同一个人；管理员退别人的单时，用执行人名字才不误导。
+
+# ============================================================
+# L 阶段：再次咨询 POST /api/work-orders/:id/re-consult
+# ============================================================
+#
+# 老单已经 CLOSED 了，学生过一阵子发现同一个问题又有新情况（学时还是没到账 /
+# 又出了个类似问题），就基于老单**再开一张新单**，新单里带着"我是从哪张单子来的"。
+#
+# 和"追问 follow-up"的本质区别（别混）：
+#   · 追问 follow-up → 在**同一张**单里继续聊，单子还是活的（回到 PROCESSING）
+#   · 再次咨询 re-consult → **另开一张新单**，老单保持 CLOSED 不动
+# 所以 re-consult 不改老单的 status/version，而是新建一张、并把新单的
+# source_order_id 指向老单、relation_type 标成 'RE_CONSULTATION'。
+#
+# 请求体：{"category": "...", "content": "...", "requestId": "...", "attachmentIds": []}
+#   —— 注意**没有 version**：因为根本不动老单，不存在乐观锁问题。
+#
+# 谁能调：老单的**提交人**本人（干事/管理员都不行 —— 401/403）
+# 前置状态：老单必须 CLOSED，否则 409 WO_STATUS_INVALID
+# 频率限制：同一张老单，**7 天内只能再次咨询一次**（防刷单）→ 超了返回 429 RE_CONSULTATION_LIMIT
+#
+# ⚠️ 幂等：requestId 走 UNIQUE。同 requestId + 同指纹 → 原样回放上次结果（不是 429）；
+#    同 requestId + 内容变了 → 409 IDEMPOTENCY_CONFLICT。
+#    指纹 = category + content + attachmentIds。
+#
+# ⚠️ 两张审计表要分开看（这是最容易写错的地方）：
+#    · t_status_log.action   → ENUM 里有 SUBMIT，没有 RE_CONSULTATION，所以新单的状态日志仍写 'SUBMIT'
+#    · t_operation_log.operation_type → 用字符串 'RE_CONSULTATION'（跟 relation_type 对齐，便于统计"再次咨询占比"）
+#
+# ⚠️ 编号生成器已统一切到 DailySeqId（MAX(序号)+1，不再是 COUNT+1）：
+#    老写法在删过测试数据后会算出已存在的单号 → 主键冲突 → 500。
+
+### L1 先把一张单走到 CLOSED（拿 lsrc）
+POST http://localhost:8080/api/work-orders
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "category": "学时录入",
+  "content": "L阶段再次咨询验证：原单",
+  "requestId": "l-reconsult-src-1"
+}
+
+> {% client.global.set("lsrc", response.body.data.workOrderId); %}
+
+### L2 干事受理
+POST http://localhost:8080/api/work-orders/{{lsrc}}/accept
+Authorization: Bearer {{staffToken}}
+Content-Type: application/json
+
+{
+  "version": 0
+}
+
+### L3 干事回复
+POST http://localhost:8080/api/work-orders/{{lsrc}}/reply
+Authorization: Bearer {{staffToken}}
+Content-Type: application/json
+
+{
+  "content": "已为你补录学时",
+  "requestId": "l-reconsult-src-reply-1",
+  "version": 1
+}
+
+### L4 学生确认 → 老单 CLOSED（version 应是 3）
+POST http://localhost:8080/api/work-orders/{{lsrc}}/confirm
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "version": 2
+}
+
+### L5 【核心】再次咨询 → 应 code=0，返回 {sourceOrderId, workOrderId}
+###    新单号记到全局变量 lnew，后面几步要用
+POST http://localhost:8080/api/work-orders/{{lsrc}}/re-consult
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "category": "学时录入",
+  "content": "老单已完结，学时又出新问题了",
+  "requestId": "l-reconsult-new-1",
+  "attachmentIds": []
+}
+
+> {% client.global.set("lnew", response.body.data.workOrderId); %}
+
+### L6 查库核对新单（MySQL 里执行）
+###    source_order_id 应 = 老单号，relation_type 应 = 'RE_CONSULTATION'，status = PENDING，version = 0
+###    SELECT work_order_id,user_id,category,status,source_order_id,relation_type,request_id
+###      FROM t_work_order WHERE work_order_id = '<lnew>';
+###    -- 状态日志仍是 SUBMIT（ENUM 里没 RE_CONSULTATION）
+###    SELECT action,before_status,after_status,operator_role
+###      FROM t_status_log WHERE work_order_id = '<lnew>';
+###    -- 审计必须是 RE_CONSULTATION，不是 SUBMIT
+###    SELECT operation_type,user_role,target_id,operation_content
+###      FROM t_operation_log WHERE target_id = '<lnew>';
+###    -- 通知：给所有 ACTIVE 的 STAFF / ADMIN 各一条 NEW_TICKET(P0)
+###    SELECT user_id,type,priority,target_id FROM t_notification_log WHERE work_order_id = '<lnew>';
+
+### L7 7 天内再来一次 → 应 429 RE_CONSULTATION_LIMIT，且工单总数不变（零写入）
+POST http://localhost:8080/api/work-orders/{{lsrc}}/re-consult
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "category": "学时录入",
+  "content": "再问一次试试",
+  "requestId": "l-reconsult-dup-1"
+}
+
+### L8 幂等重放（同 requestId + 同内容）→ 应 code=0，原样返回上次那张新单，而不是 429
+POST http://localhost:8080/api/work-orders/{{lsrc}}/re-consult
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "category": "学时录入",
+  "content": "老单已完结，学时又出新问题了",
+  "requestId": "l-reconsult-new-1",
+  "attachmentIds": []
+}
+
+### L9 同 requestId 但内容变了 → 应 409 IDEMPOTENCY_CONFLICT
+POST http://localhost:8080/api/work-orders/{{lsrc}}/re-consult
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "category": "其他",
+  "content": "完全换了个内容",
+  "requestId": "l-reconsult-new-1"
+}
+
+### L10 对一张 PENDING 的新单再次咨询 → 应 409 WO_STATUS_INVALID（只有 CLOSED 能咨询）
+POST http://localhost:8080/api/work-orders/{{lnew}}/re-consult
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "category": "学时录入",
+  "content": "想再开一张",
+  "requestId": "l-reconsult-invalid-1"
+}
+
+### L11 干事替学生开 → 应 403「只能对自己的工单再次咨询」（管理员同样是 403）
+POST http://localhost:8080/api/work-orders/{{lsrc}}/re-consult
+Authorization: Bearer {{staffToken}}
+Content-Type: application/json
+
+{
+  "category": "学时录入",
+  "content": "干事替他开",
+  "requestId": "l-reconsult-staff-1"
+}
+
+### L12 原单不存在 → 应 404「工单不存在」
+POST http://localhost:8080/api/work-orders/WO999999999999/re-consult
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "category": "学时录入",
+  "content": "x",
+  "requestId": "l-reconsult-404-1"
+}
+
+### L13 入参校验 → 应 400
+###   · 分类不合法 → 400「分类不合法，必须是：...」
+###   · 内容为空   → 400「问题描述不能为空」
+POST http://localhost:8080/api/work-orders/{{lsrc}}/re-consult
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "category": "瞎写的分类",
+  "content": "x",
+  "requestId": "l-reconsult-400-1"
+}
+
+### L14 7 天窗口边界（MySQL 里先把上次的新单改成 8 天前，再咨询就应放行）
+###    UPDATE t_work_order SET create_time = DATE_SUB(NOW(), INTERVAL 8 DAY) WHERE work_order_id = '<lnew>';
+###    然后再发一次 re-consult → 应 code=0，老单下出现第 2 张子单。
+
+### L15 两点说明（已知取舍）
+###   1. 频率限制用的是「同一张老单 7 天内只能开 1 张新单」，锁定的是老单行（FOR UPDATE），
+###      并发同时提交两张时第二张会被挡在 429，不会双双插入。
+###   2. 再次咨询**不改老单**，老单保持 CLOSED、version 不变、也不追加消息或状态日志 ——
+###      新单里已经用 source_order_id 建立了溯源关系，详情接口会把 mainOrderId/sourceOrderId 带出来。
+
+# ============================================================
+# M 阶段：异步通知派发服务（后台定时任务 → 没有 HTTP 接口）
+# ============================================================
+#
+# 这一阶段**不加任何接口**。它是一个跑在后台的定时任务：
+# 每 10 秒扫一遍 t_notification_log 里 status='PENDING' 的通知，
+# 交给对应渠道的发送器去推，然后把结果写回表。
+#
+# ── 为什么业务代码里只写 PENDING、不当场发送？ ──────────────────
+# 文档 1.13「通知机制与事务边界」定的：**工单业务成功不以通知发送成功为前提**。
+# 学生提交工单、干事回复这些是主业务；通知发不出去是另一码事，
+# 不能因为推送失败就把业务回滚掉。所以业务事务里只 INSERT 一条 PENDING
+# （见 WorkOrderService.writeNotification），真发送全交给这个异步任务。
+#
+# ── 状态机 ────────────────────────────────────────────────
+#   PENDING --推送成功----------------> SUCCESS
+#   PENDING --推送失败、重试没用完----> PENDING（retry_count+1，等间隔到了再推）
+#   PENDING --推送失败、重试用尽------> FAILED（永久失败，不再被扫）
+#
+# 节奏：首次立即推；失败后按 30s / 60s / 120s 各再推一次 → **最多尝试 4 次**（首次 + 重试 3 次）。
+#
+# ⚠️ 文档原话是"失败改 FAILED + retry_count+1"。字面照做的话，第一次失败就变 FAILED，
+#    而 FAILED 不在扫描范围里 —— 那就永远重试不了了，自相矛盾。
+#    所以实现按能自洽的读法：**重试没用完之前保持 PENDING，用完才置 FAILED**。
+#    PENDING = 还欠着、还有机会；FAILED = 彻底放弃。
+#
+# ⚠️ send_time 的语义 = **最后一次尝试时间**（成功、失败都写）。
+#    表里没有 next_retry_time 字段，这是唯一能表达"距上次尝试过了多久"的现成列。
+#    通知列表接口不返回 send_time，所以不影响前端展示。
+#
+# ⚠️ 渠道目前只实现了 PLATFORM（站内）。BROWSER / WECHAT 是 schema 里保留的枚举值、
+#    没有实现 → 派发时判为「渠道未实现: XXX」→ 走失败重试链路。
+#    这正好给了我们一个**不用改代码**就能验证重试逻辑的抓手（见 M4）。
+#
+# ── 怎么观察（没有接口，只能查库 + 看控制台）────────────────
+#   1) 重启应用（加了 @EnableScheduling 才会跑定时任务）
+#   2) 随便做点业务动作（比如提交一张工单）产生通知
+#   3) 10 秒内查库：status 从 PENDING 变 SUCCESS
+#   4) 控制台会打：[站内推送] ... / 通知推送成功 ... / 通知派发轮次结束：成功 N / 待重试 N / ...
+
+### M1 观察：存量 PENDING 应在 10 秒内被自动派发成 SUCCESS
+###    （MySQL 里执行；先记一下基线，等十几秒再查一次做对比）
+###    SELECT status, channel, COUNT(*) FROM t_notification_log GROUP BY status, channel;
+###    -- 派发后抽样：SUCCESS 行应有 send_time、fail_reason 应为 NULL
+###    SELECT notify_id, channel, status, retry_count, fail_reason, send_time
+###      FROM t_notification_log WHERE status='SUCCESS' ORDER BY send_time DESC LIMIT 5;
+
+### M2 新提交一张工单 → 产生的 NEW_TICKET 通知也会被自动推送
+POST http://localhost:8080/api/work-orders
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "category": "活动咨询",
+  "content": "M阶段异步通知验证单",
+  "requestId": "m-notify-demo-1"
+}
+
+> {% client.global.set("mwo", response.body.data.workOrderId); %}
+
+### M3 查这张单产生的通知（提交后立刻查可能还是 PENDING，10 秒内会变 SUCCESS）
+###    SELECT notify_id, user_id, type, channel, status, retry_count, fail_reason, send_time
+###      FROM t_notification_log WHERE work_order_id = '<上一步拿到的工单号>' ORDER BY notify_id;
+###    期望：干事 + 管理员各一条 NEW_TICKET、channel=PLATFORM、status=SUCCESS、send_time 有值。
+
+### M4 【重点】手工造一个必然失败的通知，验证整条重试链路
+###    （MySQL 里执行，把通知号换成你自己的，比如 NOT20260923000058）
+###    -- ① 把某条通知的渠道改成没实现的 BROWSER，并重置重试状态
+###    UPDATE t_notification_log
+###       SET status='PENDING', channel='BROWSER', retry_count=0, send_time=NULL, fail_reason=NULL
+###     WHERE notify_id = 'NOT20260923000058';
+###    -- ② 等约 10 秒后再查：应为 PENDING / retry_count=1 / fail_reason='渠道未实现: BROWSER'
+###    SELECT notify_id, channel, status, retry_count, fail_reason, send_time
+###      FROM t_notification_log WHERE notify_id = 'NOT20260923000058';
+###    -- ③ 之后每过一个间隔（30s → 60s → 120s）retry_count 依次 +1，
+###    --    第 4 次尝试失败后 status 变 FAILED、retry_count=4，此后再也不被扫到。
+###    -- ④ 想不用真等 30/60/120 秒，就把 send_time 拨回过去，骗它"已经到点了"：
+###    UPDATE t_notification_log SET send_time = DATE_SUB(NOW(), INTERVAL 1 HOUR)
+###     WHERE notify_id = 'NOT20260923000058';
+###    -- ⑤ 玩完记得还原成 PLATFORM，让它正常成功：
+###    UPDATE t_notification_log
+###       SET channel='PLATFORM', status='PENDING', retry_count=0, send_time=NULL, fail_reason=NULL
+###     WHERE notify_id = 'NOT20260923000058';
+
+### M5 配置项（src/main/resources/application.yml，app.notification 下面）
+###    enabled              true     总开关，改 false 就停掉定时任务（本地调试用）
+###    scan-interval-ms     10000    每轮间隔：上一轮跑完再等这么久（fixedDelay，不是固定频率）
+###    initial-delay-ms     5000     启动后多久跑第一轮
+###    batch-size           100      单轮最多处理多少条
+###    max-retry            3        最多重试次数（首次之外）
+###    retry-delay-seconds  30,60,120  每次重试前的等待秒数
+###    也可以临时覆盖（不用改文件），启动参数加 --app.notification.scan-interval-ms=2000 即可。
+
+### M6 两点说明
+###   1. 多实例安全：派发前会先用条件 UPDATE「抢占」
+###      （`SET send_time=NOW() WHERE notify_id=? AND status='PENDING' AND retry_count=?`），
+###      抢不到就跳过 —— 和工单那边用的是同一套乐观锁思路。
+###      所以 IDEA 里跑着一个实例、我另起临时实例做验证，两边同时跑也不会重复推送。
+###   2. FAILED 的通知目前**仍会出现在用户的通知列表里**（列表接口不按 status 过滤）。
+###      因为站内通知的"送达"本身就是写表，记录既然存在就该看得到。
+###      如果你希望"只展示 SUCCESS 的"，说一声，一行 WHERE 的事。
+
+# ============================================================
+# N 阶段（第一步）：附件上传 / 下载    POST /api/upload、GET /api/files/:id
+# ============================================================
+#
+# 接口规格严格对齐设计文档：§6「文件上传接口」+ §1.12「附件生命周期」。
+#   · 上传路径 POST /api/upload（⚠️ **不是** /api/files/upload —— 文档第 6 章独立成章、
+#     路径就是 /api/upload，所以两个接口前缀不同，Controller 里不能用类级 @RequestMapping）
+#   · 校验顺序：扩展名白名单 → Magic Number（防改后缀伪装）→ 大小 ≤5MB → 图片长边 ≤1920px
+#   · 响应字段就 4 个：attachmentId / fileUrl / fileName / fileSize
+#
+# ⚠️ 两处与文档的差异（都有理由，答辩时按这两条解释）：
+#   1. **下载接口文档里没有**：文档假设文件传 OSS、直接给 URL 就完了。我们存本地磁盘，
+#      必须有 GET /api/files/{id} 才能把文件取回来 —— 本地存储带来的必要增补。
+#   2. **允许类型放宽了**：文档 §6 / §1.10 只允许 jpg/jpeg/png；这里放成
+#      图片 + PDF + Office + 压缩包（已与用户确认）—— 学时申诉常要传证明材料，只收图片不够用。
+#      这是本接口**唯一的功能性偏差**，大小仍按文档的 5MB。
+#
+# 附件是"两步走"的，这一步只做**第一步：把文件收下来 + 登记**，
+# 还没绑定到任何工单/消息（target_id / target_type 都是 NULL，status='TEMP'）。
+# 第二步（绑定）在下一次做：提交/回复/追问/再次咨询时把 attachmentIds 带上，
+# 才会变成 status='BOUND' 并写上 target。
+#
+# ── 文件存哪 ────────────────────────────────────────────────
+# t_attachment.file_url 的注释写的是 "OSS URL"，但项目没接对象存储，所以落本地磁盘：
+#   ./uploads/{yyyyMMdd}/{attachmentId}{后缀}
+# 这个路径能从 attachment_id + 原文件名后缀直接推出来，所以库里不用另存路径；
+# file_url 存的是**下载接口地址** /api/files/{attachmentId}（它仍然是"能取到文件的 URL"）。
+# 换真 OSS 时只需改 FileStorageService 一处。
+#
+# ── 下载鉴权（不能谁拿到 id 就能下）────────────────────────
+#   · TEMP（还没绑定） → 只有上传者本人能下
+#   · BOUND 到工单   → 得能看这张工单（提交人 / 负责人 / ADMIN）
+#   · BOUND 到消息   → 找到消息所属工单，同样按工单可见性判断
+#   无权访问一律 404（不暴露"存在但不属于你"），和项目里其他资源一致。
+#
+# ⚠️ 下载接口是项目里**唯一一个成功时不返回 Result 的接口**（响应体就是文件字节流），
+#    但下载失败时仍然返回 Result 结构的 JSON（HTTP 200，错在 body 的 code 里）。
+#
+# ⚠️ 用 IDEA 的 HTTP Client 传文件就是下面这种 multipart 写法，
+#    `< ./xxx` 那行的路径换成你机器上真实存在的文件即可（相对本 .http 文件所在目录）。
+#    也可以直接用 curl：
+#      curl -X POST http://localhost:8080/api/upload -H "Authorization: Bearer {{token}}" -F "file=@C:/换成你的文件.png"
+
+### N1 上传一个文件 → code=0，只返回 attachmentId / fileUrl / fileName / fileSize
+POST http://localhost:8080/api/upload
+Authorization: Bearer {{token}}
+Content-Type: multipart/form-data; boundary=WebAppBoundary
+
+--WebAppBoundary
+Content-Disposition: form-data; name="file"; filename="demo.png"
+Content-Type: image/png
+
+< ./uploads/20260926/ATT20260926000001.png
+--WebAppBoundary--
+
+> {% client.global.set("att1", response.body.data.attachmentId); %}
+
+### N2 下载刚上传的附件 → 应直接返回文件（浏览器/IDEA 里会提示保存或预览）
+GET http://localhost:8080/api/files/{{att1}}
+Authorization: Bearer {{token}}
+
+### N3 查库核对（MySQL 里执行）：
+###    status 应为 TEMP、target_id / target_type 应为 NULL、file_url 应为 /api/files/<id>
+###    SELECT attachment_id, upload_user_id, target_id, target_type, status,
+###           file_name, file_type, file_size, file_url
+###      FROM t_attachment ORDER BY attachment_id DESC LIMIT 5;
+
+### N4 磁盘核对：
+###    ./uploads/{yyyyMMdd}/{attachmentId}{后缀}
+###    目录被 .gitignore 忽略了，运行时才有。
+
+### N5 失败路径（都可直接跑，看 code）
+###    · 不带 Token                    → 401
+###    · 别人的 TEMP 附件（换 staffToken 下载学生的 att1） → 404 附件不存在
+###    · 不允许的后缀（.exe）          → 400 不支持的文件类型（会列出允许的后缀）
+###    · exe 改名成 .png（魔数不符）   → 400 文件内容与扩展名不符（防伪装）
+###    · 超过 5MB                      → 400 文件超过大小限制
+###    · 图片长边 >1920px              → 400 图片尺寸过大（文档要求前端压到 1920px，后端二次校验）
+###    · 表单里没有 file 字段          → 400 上传请求格式错误
+###    · 空文件                        → 400 请选择要上传的文件
+###    · 下载不存在的附件              → 404 附件不存在
+###    · 文件名带路径穿越（../../x.png）→ 会被清洗掉目录部分，只留 x.png
+
+### N6 上传接口的边界
+###    · 单文件上限 5MB：spring.servlet.multipart.max-file-size（application.yml）
+###      ⚠️ Spring Boot 默认只有 1MB，不改必炸，已按文档 §6 调成 5MB；
+###      app.upload.max-file-size 是业务层第二道网，两者要对齐。
+###    · 允许的后缀在 app.upload.allowed-extensions 里配
+###      （文档只要图片；这里放宽成 图片 + PDF + Office + 压缩包，见本段开头"两处差异"第 2 条）。
+###    · Magic Number 校验的已知局限：docx/xlsx/pptx 和 zip 的文件头都是 PK\x03\x04，
+###      只能验到"是个 zip 容器"、分不出具体哪种；txt 没有固定文件头，跳过校验。
+###    · 上传者一律从 Token 取，前端传什么都不算。
+###    · 未绑定的 TEMP 附件：文档说 7 天后清理（OSS 生命周期规则 + 定时任务标记 EXPIRED）。
+###      ⚠️ 但 schema 的 t_attachment.status ENUM 只有 TEMP/BOUND，**没有 EXPIRED 可标**，
+###      所以这一步暂不实现（要清就是直接删记录 + 删文件）。
+
+### ============================================================================
+### N 阶段第二步：附件绑定（把 TEMP 附件挂到工单 / 消息上）
+### ----------------------------------------------------------------------------
+### 全流程就三句话：
+###   ① 先 POST /api/upload 拿到 attachmentId（此时 status='TEMP'，无主）
+###   ② 业务接口的请求体里带 "attachmentIds": ["ATT...", "ATT..."]
+###   ③ 后端在同一事务里校验 + 绑定（status 变 'BOUND'），失败则整个业务一起回滚
+###
+### 绑在哪儿（和文档"工单详情"响应结构对齐）：
+###   · 提交工单 / 再次咨询 → 挂在**工单级**（target_type='WORK_ORDER'，target_id=工单号）
+###   · 回复 / 追问         → 挂在**消息级**（target_type='MESSAGE'，target_id=消息号）
+###   sort_num 按 attachmentIds 的先后顺序 0,1,2... 生成，前端照这个顺序展示。
+###
+### 校验规则（文档 1.12 / §6，顺序就是这个顺序）：
+###   ① 附件不存在                     → 400 附件不存在
+###   ② status 不是 TEMP / 已有 target → 400 附件已使用
+###   ③ upload_user_id 不是当前用户     → 403 不能绑定他人上传的附件
+###   ④ create_time 超过 7 天           → 400 附件已过期，请重新上传
+###   ⚠️ 文档把"非本人上传"定成 403（不是本项目惯用的 404），这里照文档来。
+### ============================================================================
+
+### N7 提交工单（带 2 个附件）
+###    先跑 N7a / N7b 各上传一个文件，再跑 N7c 提交。
+###    两个上传请求的响应里会分别把 attachmentId 写进 att1 / att2。
+
+### N7a 上传附件 1
+POST http://localhost:8080/api/upload
+Authorization: Bearer {{token}}
+Content-Type: multipart/form-data; boundary=WebAppBoundary
+
+--WebAppBoundary
+Content-Disposition: form-data; name="file"; filename="demo1.png"
+Content-Type: image/png
+
+< ./uploads/20260926/ATT20260926000001.png
+--WebAppBoundary--
+
+> {% client.global.set("att1", response.body.data.attachmentId); %}
+
+### N7b 上传附件 2
+POST http://localhost:8080/api/upload
+Authorization: Bearer {{token}}
+Content-Type: multipart/form-data; boundary=WebAppBoundary
+
+--WebAppBoundary
+Content-Disposition: form-data; name="file"; filename="demo2.png"
+Content-Type: image/png
+
+< ./uploads/20260926/ATT20260926000002.png
+--WebAppBoundary--
+
+> {% client.global.set("att2", response.body.data.attachmentId); %}
+
+### N7c 提交工单，带上这两个附件 → code=0，返回 workOrderId
+POST http://localhost:8080/api/work-orders
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "category": "学时录入",
+  "content": "带附件的提交测试",
+  "requestId": "{{$uuid}}",
+  "attachmentIds": ["{{att1}}", "{{att2}}"]
+}
+
+> {% client.global.set("wo", response.body.data.workOrderId); %}
+
+### N8 干事回复这张工单，带一个附件 → 附件会挂到**这条回复消息**上
+###    注意：回复前工单必须是 PROCESSING/REPLIED，新单要先跑受理那一步。
+POST http://localhost:8080/api/work-orders/{{wo}}/reply
+Authorization: Bearer {{staffToken}}
+Content-Type: application/json
+
+{
+  "content": "这是带附件的回复",
+  "requestId": "{{$uuid}}",
+  "attachmentIds": ["{{att3}}"]
+}
+
+> {% client.global.set("replyMsgId", response.body.data.messageId); %}
+
+### N9 学生追问，带一个附件 → 同样挂到**这条追问消息**上
+POST http://localhost:8080/api/work-orders/{{wo}}/follow-up
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "content": "追问并补一张图",
+  "requestId": "{{$uuid}}",
+  "attachmentIds": ["{{att4}}"]
+}
+
+> {% client.global.set("followMsgId", response.body.data.messageId); %}
+
+### N10 再次咨询（单必须是 CLOSED 终态），带一个附件 → 挂在**新单**上，原单不动
+POST http://localhost:8080/api/work-orders/{{wo}}/re-consult
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "category": "学时录入",
+  "content": "老问题又来了",
+  "requestId": "{{$uuid}}",
+  "attachmentIds": ["{{att5}}"]
+}
+
+> {% client.global.set("newWo", response.body.data.workOrderId); %}
+
+### N11 查库核对绑定结果（MySQL 里执行）
+###    · 提交的附件：target_type=WORK_ORDER、target_id=工单号、sort_num 按传入顺序 0,1
+###    · 回复的附件：target_type=MESSAGE、target_id=回复消息号
+###    · 全都应该是 status='BOUND'，bind_time 非空
+###    SELECT attachment_id, target_type, target_id, sort_num, status, bind_time
+###      FROM t_attachment WHERE status='BOUND' ORDER BY bind_time DESC LIMIT 10;
+
+### N12 失败路径（都能直接跑，看 body 里的 code）
+###    · 用已经绑过的 att1 再提交一张单        → 400 附件已使用
+###    · attachmentIds 里塞一个不存在的 ID     → 400 附件不存在
+###    · 拿 staff 上传的 att3 用学生 Token 提交 → 403 不能绑定他人上传的附件
+###    · 把这个附件的 create_time 改成 8 天前再提交 → 400 附件已过期，请重新上传
+###      UPDATE t_attachment SET create_time = DATE_SUB(NOW(), INTERVAL 8 DAY)
+###       WHERE attachment_id = '换成你的附件ID';
+###    · 复用同一个 requestId 提交（409 请勿重复提交）→ 附件应仍是 TEMP
+###      这条专门验证"业务回滚时附件绑定一起撤销"，查库确认 status='TEMP'
+
+### ============================================================================
+### N 阶段第三步：把附件和状态历史「展示」出来
+### ----------------------------------------------------------------------------
+### 详情接口现在会多出三块内容：
+###   · attachments   —— **工单级**附件（提交/再次咨询时带上来的，挂在工单本身）
+###   · messages      —— 每条消息自带 attachments（回复/追问时传的，挂在消息上）
+###   · statusHistory —— 状态流转历史（SUBMIT / ACCEPT / REPLY / FOLLOW_UP /
+###                      CONFIRM / MANUAL_CLOSE / ADMIN_CLOSE / RETURN / MERGE）
+###
+### 附件元素的字段是 { attachmentId, fileUrl, fileName, sortNum }（注意有 sortNum、没有 fileSize）。
+### 没有附件的消息给的是**空数组 []**而不是 null，前端不用写判空。
+###
+### 另外补上了文档 #17 的消息列表接口 GET /api/work-orders/{id}/messages
+###   （前端聊天页轮询 15 秒用，只取消息、不带工单字段/附件/历史那些；权限同详情）
+### ============================================================================
+
+### O1 工单详情（带上附件 + 状态历史）→ 看 data.attachments / data.statusHistory
+###    / data.messages[n].attachments
+GET http://localhost:8080/api/work-orders/{{wo}}
+Authorization: Bearer {{token}}
+
+### O2 消息列表（文档 #17）→ data 是**数组**（不是对象），元素结构和详情里的 messages 完全一致
+GET http://localhost:8080/api/work-orders/{{wo}}/messages
+Authorization: Bearer {{token}}
+
+### O3 消息列表 + 每 15 秒轮询（前端聊天页的用法）
+GET http://localhost:8080/api/work-orders/{{wo}}/messages
+Authorization: Bearer {{staffToken}}
+
+### O4 失败路径
+###    · 不存在的单：详情和消息列表都是 404 工单不存在
+###    · 别的学生：403 无权查看该工单
+###    · 干事看『不是自己接的单、且状态不是 PENDING』：403（待接单的能看，不然没法抢单）
+###    · 不带 Token：HTTP 401（这个是拦截器直接 setStatus，body 里也有 code=401）
+
+### ============================================================================
+### P 阶段：FAQ 常见问题（文档 §8 / 接口 #25–#29，共 5 个）
+### ----------------------------------------------------------------------------
+### 读接口是「**可选 Token**」：不登录也能看（学生查常见问题），
+### 但登录了并且是管理员时，多看得到未发布（UNPUBLISHED）的条目。
+###   · 没带 Token        → 当游客，只看 PUBLISHED
+###   · 带过期/无效 Token  → 也当游客（公开页面不该因 Token 过期就打不开）
+###   · 带管理员 Token     → 能看 UNPUBLISHED
+### ⚠️ 但 /api/admin/faqs 仍然**强制**要管理员 Token：拦截器里只把 /api/faqs 及其子路径
+###    设成"可选"，/api/admin/faqs 不在其中（中间隔着 /admin）。
+###
+### 三个写接口（新增/编辑/下架）都会往 t_operation_log 记一笔：
+###   CREATE_FAQ / UPDATE_FAQ / DELETE_FAQ，target_type='FAQ'
+### ============================================================================
+
+### P1 FAQ 列表（不登录也能跑）→ data 是**数组**
+###    注意列表项**不含 answer**：列表是"问题目录"，点开某条才走详情看答案
+###    （文档把 view_count 的自增放在详情里，列表就发答案的话浏览量永远是 0）
+GET http://localhost:8080/api/faqs
+
+### P2 按分类筛选（分类取值和工单一样：学时录入 / 审核驳回 / 活动咨询 / 规则疑问 / 其他）
+###    分类写错会返回 400，而不是静默给个空列表
+GET http://localhost:8080/api/faqs?category=学时录入
+
+### P3 关键词搜索（走 t_faq 的 FULLTEXT(question, keywords) + ngram 中文分词）
+###    ⚠️ 关键词少于 2 个字搜不出来（ngram_token_size 默认是 2）
+GET http://localhost:8080/api/faqs?keyword=驳回
+
+### P4 FAQ 详情（带 answer，顺便把 view_count +1）→ 不登录也能看
+GET http://localhost:8080/api/faqs/FAQ000001
+
+### P5 管理员看列表 → 多出未发布（UNPUBLISHED）的条目，每条都带 status 字段
+GET http://localhost:8080/api/faqs
+Authorization: Bearer {{adminToken}}
+
+### P6 管理员新增 FAQ → 返回新建的完整记录（faqId 形如 FAQ000004）
+###    status 固定 PUBLISHED、sortNum 固定 0；想要"草稿"就先建再 DELETE 下架
+POST http://localhost:8080/api/admin/faqs
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{
+  "category": "活动咨询",
+  "question": "怎么查看自己的第二课堂学时？",
+  "answer": "登录系统后进入【我的学时】页面，可查看已录入的学时明细。",
+  "keywords": "学时,查询,查看,明细"
+}
+
+> {% client.global.set("faqId", response.body.data.faqId); %}
+
+### P7 编辑 FAQ（**部分更新**：传了才改，null 表示不动）
+###    下面这个 body 只改答案，分类/问题/关键词都保持原样
+PUT http://localhost:8080/api/admin/faqs/{{faqId}}
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{
+  "answer": "登录系统后进入【我的学时】页面；如对学时录入有疑问，可在本系统提交工单。"
+}
+
+### P8 编辑时顺便调状态和排序号（把一条未发布的重新发布）
+PUT http://localhost:8080/api/admin/faqs/{{faqId}}
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{
+  "status": "PUBLISHED",
+  "sortNum": 1
+}
+
+### P9 下架 FAQ（**软删除**：只把 status 改成 UNPUBLISHED，行留在库里）
+###    不物理删除的原因：审计日志里记着这个 faqId，删了就成悬空引用；而且误删还能改回来
+DELETE http://localhost:8080/api/admin/faqs/{{faqId}}
+Authorization: Bearer {{adminToken}}
+
+### P10 失败路径（看 body 里的 code）
+###    · 学生/干事调 P6/P7/P9             → 403「仅管理员可管理 FAQ」
+###    · 不登录调 P6/P7/P9                → HTTP 401（拦截器拦下）
+###    · 看未发布条目的详情（非管理员）    → 404「FAQ 不存在或未发布（FAQ_NOT_FOUND）」
+###                                         文档要求"不暴露存在性"，所以不给 403
+###    · 详情/编辑/下架一个不存在的 faqId  → 404「FAQ 不存在」
+###    · 新增/编辑时分类不合法            → 400
+###    · 新增时问题标题超 50 字            → 400
+###    · 编辑时把 question 传成空白字符串  → 400（故意区分"没传"和"传了空值"）
+###
+### ⚠️ 一个已知的、不影响安全的现象（答辩可能被问）：
+###    用**方法不支持**的请求打管理端（例如 `GET /api/admin/faqs`，那里只有 POST），
+###    会返回 HTTP 200 + {"code":405,"message":"请求方法不支持：GET"}，而不是 401。
+###    原因：Spring 在"查找 handler"阶段就发现方法不匹配并抛 405 了，这一步**早于拦截器**，
+###    所以拦截器压根没跑。这不是鉴权漏洞 —— 真正会读写数据的 POST/PUT/DELETE 都必须先过拦截器；
+###    只是暴露了"这个路径存在"。要修的话得把鉴权从拦截器挪到 Filter（在 handler 映射之前执行）。
+
+### ============================================================================
+### Q 阶段：管理员日志查询（文档 §10.6 / 接口 #48、#49）
+### ----------------------------------------------------------------------------
+### 两个接口都是「管理员专属」，返回**分页对象**：{ total, page, pageSize, list }
+###   · /api/admin/logs/status-logs    → t_status_log（工单**状态**怎么变的）
+###   · /api/admin/logs/operation-logs → t_operation_log（**谁**动过系统：登录/提交/接单/管FAQ…）
+### 这两张表不是冗余：前者是业务时间线（详情页画进度条用），后者是查账追责用的。
+### 到现在为止所有写操作都往这两张表记了一笔，但一直没有"读"的出口 —— 这个阶段补的就是它。
+###
+### 分页约定（和工单列表一致）：page 默认 1、pageSize 默认 20、上限 50。
+### ============================================================================
+
+### Q1 状态日志（全量，最新在前）
+GET http://localhost:8080/api/admin/logs/status-logs
+Authorization: Bearer {{adminToken}}
+
+### Q2 状态日志 + 分页
+###    末尾的 log_id 排序是为了让"同一秒发生的事件"顺序稳定，否则翻页可能重复/漏条
+GET http://localhost:8080/api/admin/logs/status-logs?page=1&pageSize=5
+Authorization: Bearer {{adminToken}}
+
+### Q3 按工单筛选（换成你自己的工单号）
+GET http://localhost:8080/api/admin/logs/status-logs?workOrderId=WO202609260001
+Authorization: Bearer {{adminToken}}
+
+### Q4 操作日志（全量，最新在前）
+GET http://localhost:8080/api/admin/logs/operation-logs
+Authorization: Bearer {{adminToken}}
+
+### Q5 按操作类型筛：只看登录记录（排查异常登录最常用）
+###    可选值随功能增长：LOGIN / LOGOUT / CHANGE_PASSWORD / SUBMIT / ACCEPT / REPLY /
+###    FOLLOW_UP / CONFIRM / MANUAL_CLOSE / ADMIN_CLOSE / RETURN / MERGE /
+###    RE_CONSULTATION / CREATE_FAQ / UPDATE_FAQ / DELETE_FAQ
+GET http://localhost:8080/api/admin/logs/operation-logs?operationType=LOGIN
+Authorization: Bearer {{adminToken}}
+
+### Q6 按操作人筛（学号）
+GET http://localhost:8080/api/admin/logs/operation-logs?operatorId=2023001001
+Authorization: Bearer {{adminToken}}
+
+### Q7 按时间范围筛（yyyy-MM-dd，**起止两天都算在内**）
+###    实现上：起始日 >= 当天 00:00，截止日用 < 次日 00:00（所以"截止日当天"不会被漏掉）
+GET http://localhost:8080/api/admin/logs/operation-logs?startDate=2026-09-01&endDate=2026-09-30
+Authorization: Bearer {{adminToken}}
+
+### Q8 组合筛选：某人在某天提交的工单
+GET http://localhost:8080/api/admin/logs/operation-logs?operatorId=2023001001&operationType=SUBMIT&startDate=2026-09-26&endDate=2026-09-26
+Authorization: Bearer {{adminToken}}
+
+### Q9 失败路径（看 body 里的 code）
+###    · 学生/干事调 Q1/Q4                → 403「仅管理员可查看日志」
+###    · 不登录调                          → HTTP 401（拦截器拦下）
+###    · startDate 晚于 endDate            → 400「起始日期不能晚于截止日期」
+###    · 日期写成 2026/09/01               → 400「日期格式不正确，应为 yyyy-MM-dd」
+###                                          （故意手工解析日期：交给 Spring 转换失败会变 500）
+###    · operationType 传个不存在的值       → code=0 + 空列表
+###                                          （这列是 varchar、类型会随功能增长，硬编码白名单只会变成维护负担）
+
+### ============================================================================
+### R 健康检查（GET /health，文档 §2 / 接口清单 #0）
+### ============================================================================
+### 用途：探活。给运维 / 负载均衡 / 监控用，回答"服务还活着吗、依赖还通吗"。
+### 特点：① 不需要登录（WebConfig 里已把它排除在拦截器之外）
+###       ② 不写任何操作日志（探活一秒好几次，写日志会把审计表撑爆）
+###       ③ 是全项目唯一会返回非 200 的接口 —— 其它接口哪怕业务失败也一律 HTTP 200
+
+### R1 正常探活（不需要 Token）
+GET http://localhost:8080/health
+
+### R2 故意带个无效 Token —— 结果应与 R1 完全一样，证明它不受鉴权影响
+GET http://localhost:8080/health
+Authorization: Bearer invalid.token.here
+
+### R3 返回结构说明
+###    data.status     : 整体状态，UP / DOWN
+###    data.db         : 数据库探活，UP / DOWN（执行 SELECT 1 FROM DUAL，带 3 秒超时）
+###    data.redis      : UP / DOWN / SKIPPED
+###                      —— ⑧ 阶段已接入 Redis（pom 加了 spring-boot-starter-data-redis，
+###                         探活走官方客户端真 PING），正常情况下是真实结果：
+###                         UP      = PING 通了
+###                         DOWN    = 连不上（会把整体拉成 DOWN + HTTP 503，这正是文档要的行为，
+###                                   原因在服务日志里："健康检查：Redis 探活失败 - ..."）
+###                         SKIPPED = 探活开关被关掉（--app.health.redis-enabled=false），
+###                                   留给"本地没启 Redis 又想看 DB 情况"的调试档，不拖累整体状态
+###    data.timestamp  : ISO-8601 UTC 时间（末尾带 Z），文档示例就是这个格式
+###    正常：HTTP 200 + {"code":0,"message":"ok",  ... "status":"UP"}
+###    异常：HTTP 503 + {"code":500,"message":"service unavailable", ... "status":"DOWN"}
+###    503 只在"真的挂了"时才出现（数据库连不上，或 Redis 连不上）
+###    ⚠️ 第一次探活偏慢（实测 3~5 秒）：那是 Lettuce **首次建立连接**的一次性开销，
+###       之后稳定在 10 毫秒左右。监控每隔几秒探一次，只有服务刚起来那一下慢，属正常现象。
+
+### R4 手工验证另外两种取值（可选，用临时实例，别影响你 IDE 里的 8080）
+###    a) 想看 DOWN + HTTP 503（但 db 仍如实报 UP）：把 Redis 端口故意指错
+###       java -jar target/second-classroom-0.0.1-SNAPSHOT.jar --spring.data.redis.port=6399
+###    b) 想看 SKIPPED（不拖累 status、仍旧 200）：
+###       java -jar target/second-classroom-0.0.1-SNAPSHOT.jar --app.health.redis-enabled=false
+###    c) ⚠️ 本地**没双击启 Redis**（那个黑窗口）时，R1 会如实返回 redis=DOWN + HTTP 503。
+###       那是"如实反映"，不是 bug。要么双击 start-redis.bat 把 Redis 起来，要么按 b) 临时关掉探活。
+
+### ============================================================================
+### S 公告（文档 §9 / 接口清单 #30~#33）
+### ============================================================================
+### 公告和 FAQ 的区别：FAQ 是"长期沉淀的问答"（学生自助查），
+### 公告是"有时效的通知"（首页公告栏），所以它多了一个 expire_time ——
+### 到点自动从列表消失，不用管理员手动下架。
+### 两者的共同点：管理员写、学生读、下架都是"软删除"（不 physical delete）。
+###
+### 🔴 打 S3/S4/S5/S6/S8 之前，必须**先跑一次上面的「㉔ 管理员登录」**！
+###    {{adminToken}} 不是手写常量，是㉔那条请求跑完后自动存进 IDE 全局变量的。
+###    全局变量只活在当前 IDE 会话里 —— 重启 IDE / 重开这个文件就丢了，
+###    丢了之后请求就变成"没带 Token"，返回【401 未登录或 Token 格式错误】。
+###    三句 401 要分清楚（都是我们拦截器返回的，含义完全不同）：
+###      未登录或 Token 格式错误  → 请求里压根没有可用的 Authorization 头
+###      Token 已失效，请重新登录  → Token 在登出黑名单里
+###      Token 无效或已过期       → 签名不对或超过了有效期
+###    S1/S2 以及 R1/R2 都不需要 Token，随时可以直接打。
+###
+### 📋 推荐按这个顺序跑：
+###    ㉔ 管理员登录  →  S5 发布公告（记下返回的 noticeId）  →  S6 编辑  →  S7 清空过期时间
+###    →  S8 归档  →  S3 用 ?status=ARCHIVED 把它翻出来
+###    S6/S7/S8 的路径里写的是示例单号 NOTICE000001，所以**单独点也能跑**（不依赖 S5）。
+###    想操作刚建的那条：把路径里的 NOTICE000001 换成 S5 返回的 noticeId。
+
+### S1 公告列表（不需要 Token —— 首页公告栏不能要求先登录）
+GET http://localhost:8080/api/announcements
+
+### S2 带无效 Token 也照常返回（验证"可选 Token"生效）
+GET http://localhost:8080/api/announcements
+Authorization: Bearer invalid.token.here
+
+### S3 【仅管理员】查已归档的公告
+###     归档是软删除，行还在库里，但默认列表看不到它 —— 得用这个入口翻出来。
+###     普通用户传这个参数没用（永远只看 ACTIVE，不会越权）。
+###     ⚠️ 这个 status 参数是我按 FAQ 那边"管理员能多看一点"的既定做法补的，
+###        文档里没写（文档只给了"ACTIVE 且未过期"那一条 SQL）。不想要可以删。
+GET http://localhost:8080/api/announcements?status=ARCHIVED
+Authorization: Bearer {{adminToken}}
+
+### S4 【仅管理员】查全部（含已过期、已归档）
+GET http://localhost:8080/api/announcements?status=ALL
+Authorization: Bearer {{adminToken}}
+
+### S5 发布公告（仅管理员）
+POST http://localhost:8080/api/admin/announcements
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{
+  "title": "关于第二课堂学时录入的通知",
+  "content": "本学期学时录入截止日期为 2026-09-30，请尽快提交材料。",
+  "sortNum": 1,
+  "expireTime": "2026-09-30 23:59:59"
+}
+
+> {% client.global.set("noticeId", response.body.data.noticeId); %}
+
+### S6 编辑公告（部分更新：只写要改的字段）
+###    ⚠️ 路径里写的是**写死的示例单号**，点下去就能跑，不依赖 S5 先跑过。
+###       为什么不用 {{noticeId}}？因为它只有在跑过 S5 之后才有值 ——
+###       直接点 S6 的话 IDE 会报"未替换的变量 noticeId"，连请求都发不出去，
+###       比"接口返回 404 公告不存在"难懂得多。（这个坑踩过了。）
+###       想改成操作"刚在 S5 建的那条"，把路径里的 NOTICE000001 换成 {{noticeId}} 即可。
+PUT http://localhost:8080/api/admin/announcements/NOTICE000001
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{
+  "title": "关于第二课堂学时录入的通知（已更新）"
+}
+
+### S7 把公告改成"永久有效"（expireTime 传空串 = 清成 NULL）
+PUT http://localhost:8080/api/admin/announcements/NOTICE000001
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{
+  "expireTime": ""
+}
+
+### S8 归档公告（软删除：status 改成 ARCHIVED，行不删）
+DELETE http://localhost:8080/api/admin/announcements/NOTICE000001
+Authorization: Bearer {{adminToken}}
+
+### S9 返回结构 & 语义说明
+###    data 是数组；每个元素 {noticeId, title, content, sortNum, status, expireTime,
+###                        publisherName, publishTime, updateTime}
+###    · noticeId   形如 NOTICE + 6 位序号（NOTICE000001）
+###    · expireTime 为 null = 永久有效；有值 = 到点自动从列表消失（**不物理删**）
+###    · status     ACTIVE=展示中 / ARCHIVED=已归档
+###    排序：sortNum 升序，同 sortNum 再按 publishTime 倒序（新发的在前）
+
+### S10 失败路径（看 body 里的 code）
+###    · 学生/干事调 S5/S6/S8            → 403「仅管理员可管理公告」
+###    · 不登录调 S5/S6/S8               → HTTP 401（拦截器拦下）
+###    · 缺 title / content              → 400
+###    · 标题超 30 字                    → 400
+###    · expireTime 写成 2026/09/30      → 400「格式不正确，应为 yyyy-MM-dd HH:mm:ss」
+###                                       （故意收成 String 自己解析：交给 Jackson 会变 500）
+###    · expireTime 传 2026-12-31T23:59:59（ISO 带 T）→ 也接受，不因为一个字符报错
+###    · status 传 DELETED              → 400
+###    · 编辑/归档不存在的公告           → 404
+###    · 重复归档同一条                  → code=0（幂等，不报错）
+
+### ============================================================================
+### T 敏感词库（文档 §10.2 / 接口清单 #37~#40）
+### ============================================================================
+### 敏感词是**给工单打标记**用的，不是提交闸门：学生提交的内容命中敏感词时，
+### 工单会被打上 is_flagged，管理员在后台 GET /api/admin/work-orders/search?isFlagged=true
+### 里专门筛出来复核。所以它的作用是"把可疑内容捞出来给人看"，而不是"自动拒绝提交"。
+###
+### 🔴 打 T1~T5 之前也要**先跑一次「㉔ 管理员登录」**（{{adminToken}} 的来源，理由同 S 段）。
+###
+### ⚠️ 表名是 t_sensitive_word（**单数**）—— 文档正文里写的 t_sensitive_words 是错的，
+###    但**接口路径**按文档保持复数 /api/admin/sensitive-words（这是对外的 URL，前后端约定好的）。
+###
+### 📌 与文档的偏差（答辩时要说清楚）：文档在每个写操作后面都写了
+###    "Redis SADD sensitive_words:cache" / "重建 Redis 缓存"。项目还没接 Redis，
+###    这三处**显式跳过**（代码里用 `// 📌 Redis 步骤（已跳过）` 标注）。
+###    不影响正确性 —— 缓存只是加速匹配，真数据源始终是这张表；
+###    等第⑧阶段接入 Redis，就在那三个注释位置补 SADD / 重建。
+###    （和 /health 里 redis="SKIPPED" 同一个口径：**说明没做，而不是假装做了**。）
+
+### T1 敏感词列表（仅管理员）
+###    照文档不分页、不过滤状态 —— 被禁用的词也要能看到，否则禁错了想恢复都找不到它在哪。
+GET http://localhost:8080/api/admin/sensitive-words
+Authorization: Bearer {{adminToken}}
+
+### T2 新增一个敏感词（仅管理员）
+###    已存在的词不会报错，会如实告诉你是"已存在"还是"重新启用"。
+POST http://localhost:8080/api/admin/sensitive-words
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{
+  "word": "违规词示例"
+}
+
+### T3 批量导入（仅管理员）
+###    ⚠️ 文档给的是**逗号分隔的长字符串**，不是数组（方便从 Excel 直接粘一列）。
+###    中文逗号（，）、顿号（、）、分号（；）、换行都认。
+###    返回 {total, added, skipped}，恒等式：added + skipped == total
+POST http://localhost:8080/api/admin/sensitive-words/batch
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{
+  "words": "违规词甲,违规词乙,违规词丙"
+}
+
+### T4 禁用敏感词（仅管理员）—— **软删除**：status 改成 DISABLED，行不删
+###    ⚠️ 路径里的 1 是示例，换成 T1 列表里真实的 wordId。
+###       （wordId 是自增整数，不是字符串 —— 这是项目里少见的自增主键。）
+DELETE http://localhost:8080/api/admin/sensitive-words/1
+Authorization: Bearer {{adminToken}}
+
+### T5 【验证"恢复启用"】把刚禁用的词再加一次 → 会把它的 status 改回 ACTIVE
+###    ⚠️ 这一条**文档没写**，是我补的：因为 word 上有 UNIQUE 约束（uk_word），
+###       一个词被禁用后唯一键仍然占着位置，纯 INSERT IGNORE 的话这个词就永远加不回来了。
+###       不想要这个行为，可以删掉 SensitiveWordService.addOrEnable 里那半段 UPDATE。
+###       （多跑几次没关系：已经是 ACTIVE 的词再加只会提示"已存在"，不会报错。）
+POST http://localhost:8080/api/admin/sensitive-words
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{
+  "word": "违规词示例"
+}
+
+### T6 返回结构说明
+###    T1：data 是数组；元素 {wordId(数字), word, status, creatorName, createTime, updateTime}
+###    T2：data 是单个元素，结构同上
+###    T3：data 是 {total, added, skipped}
+###        · total   —— 去重后实际处理的词数（粘 10 个里有 3 个重复 → total=7）
+###        · added   —— 真正写动了库的（新增 + 之前被禁用这次恢复启用的）
+###        · skipped —— 本来就在库且生效中的，什么都没做
+###        排序 T1：create_time DESC, word_id DESC
+
+### T7 失败路径（看 body 里的 code）
+###    · 学生/干事调 T1~T4            → 403「仅管理员可管理敏感词」
+###    · 不登录调                     → HTTP 401（拦截器拦下）
+###    · word 为空 / 纯空白            → 400
+###    · word 超过 100 字              → 400（varchar(100) 的上限）
+###    · 批量里混进超长词              → 400 并指出是哪个（**不静默丢掉**，否则 total 对不上）
+###    · 批量空串 / 全是分隔符         → 400
+###    · wordId 传 abc                 → 400「敏感词 ID 必须是数字」（**不是 500**）
+###    · 禁用不存在的 wordId           → 404
+###    · 重复禁用同一条                → code=0（幂等）
+###    · 重复添加同一个词              → code=0 + 「该词已存在，未重复添加」（不报错）
+
+### ============================================================================
+### U 快捷回复模板（文档 §10.3 / 接口清单 #41~#44）
+### ============================================================================
+### 用途：干事回复工单时，界面上给一排"常用话术"按钮，点一下就把内容填进输入框，
+### 改两个字就能发。解决的是"同一句话每天要手打二十遍"的问题。
+### 和 FAQ 的区别一句话：**FAQ 是学生自己查，模板是干事回复时套用。**
+###
+### 🔴 U2~U7 要**先跑一次「㉔ 管理员登录」**（{{adminToken}} 的来源，理由同 S/T 段）。
+###    下面的请求统一只用 {{adminToken}} 这一个变量 —— 少一个变量就少一处"未替换的变量"报错。
+###
+### ⚠️ **权限是这一组最容易搞错的地方**：
+###    GET /api/templates 文档标的是「**需** Token」（不是「可选 Token」），角色列写的是"全部"。
+###    → 匿名 = 401，无效 Token = 401，**但学生和干事都能读**（不是管理员专属）。
+###    → 所以它**不在** /api/admin/** 下面，也**不能**加进拦截器的可选名单。
+###      （对照：FAQ 和公告是「可选 Token」，游客能看；模板不是。）
+
+### U1 模板列表（需要 Token；换成学生/干事的 Token 也一样能读）
+###    默认只返回 ACTIVE 的，按 sort_num 升序。
+GET http://localhost:8080/api/templates
+Authorization: Bearer {{adminToken}}
+
+### U2 按分类筛（值必须是那 5 个中文分类之一，否则 400 而不是静默返回空列表）
+GET http://localhost:8080/api/templates?category=学时录入
+Authorization: Bearer {{adminToken}}
+
+### U3 【仅管理员】查已禁用的模板
+###     禁用是软删除，行还在库里，默认列表看不到 —— 得用这个入口翻出来。
+###     学生/干事传这个参数没用（永远只看 ACTIVE，不会越权）。
+###     ⚠️ 这个 status 参数是照"管理员能多看一点"的既定做法补的，文档只写了"管理员可加 status 筛选全部"。
+GET http://localhost:8080/api/templates?status=DISABLED
+Authorization: Bearer {{adminToken}}
+
+### U4 新增模板（仅管理员）
+###    templateId 自动生成 TPL+4位序号（不带日期）。
+POST http://localhost:8080/api/admin/templates
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{
+  "category": "学时录入",
+  "title": "学时录入时效回复",
+  "content": "您好，您的学时将在活动结束后的 3-5 个工作日内录入，请耐心等待。",
+  "sortNum": 1
+}
+
+### U5 编辑模板（部分更新：只写要改的字段）
+###    ⚠️ 路径里的 TPL0001 是示例，换成 U1 或 U4 里真实的 templateId。
+PUT http://localhost:8080/api/admin/templates/TPL0001
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{
+  "content": "补充：如超过 5 个工作日仍未录入，请在本工单追问。"
+}
+
+### U6 【复活】把禁用掉的模板重新启用（PUT 一个 status=ACTIVE）
+PUT http://localhost:8080/api/admin/templates/TPL0001
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{
+  "status": "ACTIVE"
+}
+
+### U7 禁用模板（软删除：status 改成 DISABLED，行不删）
+DELETE http://localhost:8080/api/admin/templates/TPL0001
+Authorization: Bearer {{adminToken}}
+
+### U8 返回结构 & 失败路径
+###    data 是数组；元素 {templateId, category, title, content, sortNum, status,
+###                      creatorName, createTime, updateTime}
+###    templateId 形如 TPL + 4 位序号（TPL0001）；不要用带日期的生成器，会主键冲突。
+###    · 匿名/无效 Token 调 U1~U3        → HTTP 401
+###    · 学生/干事调 U4~U7               → 403「仅管理员可管理快捷回复模板」
+###    · 缺 category/title/content       → 400
+###    · category 不在那 5 个里          → 400
+###    · title 超 100 字                 → 400
+###    · sortNum 为负                    → 400
+###    · 编辑/禁用不存在的模板Id         → 404
+###    · 重复禁用同一条                  → code=0（幂等）
+###    · PUT 一个字段都不传              → code=0 + 「没有需要修改的字段」
+###    · 学生传 ?status=DISABLED         → 参数被忽略，仍只返回 ACTIVE
+
+####################################################################
+# V 组：用户管理（#34~#36）—— 列表 / 启用禁用 / 重置密码，全部仅管理员
+#
+# 🔴 跑之前先跑一次「㉔ 管理员登录」，{{adminToken}} 是它写进 IDE 全局变量的；
+#    IDE 重启后变量会丢，那时会看到 401「未登录或 Token 格式错误」——不是接口坏了。
+#    V7.1 还要用学生的 Token（第 4 条「登录并自动保存 token」存的 {{token}}）。
+#
+# ⚠️ V7 会**真的把学生账号禁用掉**（这正是要演示的效果），V8 是恢复动作，两条连着做。
+#    万一忘了跑 V8，用这两句恢复（在 MySQL 里执行）：
+#    UPDATE t_user SET status='ACTIVE' WHERE user_id='2023001001';
+#    UPDATE t_user SET password='$2a$10$MYD8338x8UBTV6Uxpbm0z.H4NysTsPPeBxZUkWT1qiswrLErea8ie'
+#      WHERE user_id='2023001001';   -- 密码还原成 123456
+####################################################################
+
+### V1 用户列表（默认分页 page=1 / pageSize=20）
+###    data 是 PageResult 外壳：{total, page, pageSize, list}
+###    ⚠️ 元素里**没有 password 字段**——bcrypt 哈希绝不该随列表漏出去。
+GET http://localhost:8080/api/admin/users
+Authorization: Bearer {{adminToken}}
+
+### V2 翻页（pageSize=2，看清楚"跳过几行、取几行"有没有搞反）
+###    🔴 判据：第 1 页必须**真的有数据**。如果 total 正常、第 1 页却是空数组，
+###       就是 LIMIT 的两个参数写反了（MySQL 的 `LIMIT a, b` = 跳过 a 行、取 b 行）。
+GET http://localhost:8080/api/admin/users?page=2&pageSize=2
+Authorization: Bearer {{adminToken}}
+
+### V3 按角色筛（userType 是固定 ENUM：STUDENT / STAFF / ADMIN）
+GET http://localhost:8080/api/admin/users?userType=STUDENT
+Authorization: Bearer {{adminToken}}
+
+### V4 按关键词搜（同时糊 userId 和 userName，搜学号片段或姓名里的字都能命中）
+GET http://localhost:8080/api/admin/users?keyword=2023
+Authorization: Bearer {{adminToken}}
+
+### V5 只看被禁用的账号（多半是空数组——这就是软删除的设计：禁用只改状态、不删行）
+GET http://localhost:8080/api/admin/users?status=DISABLED
+Authorization: Bearer {{adminToken}}
+
+### V6 非法筛选值 → 400（固定 ENUM 就该明确报出来，别静默返空列表让人猜）
+GET http://localhost:8080/api/admin/users?userType=TEACHER
+Authorization: Bearer {{adminToken}}
+
+### V7 【🔴 改动数据】禁用学生账号
+###    返回 data.status 应为 DISABLED，同时库里 status 也真的变了。
+PUT http://localhost:8080/api/admin/users/2023001001/status
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{
+  "status": "DISABLED"
+}
+
+### V7.1 【本组重点】拿"学生自己的 Token"打任意业务接口 → HTTP 403「账号已禁用」
+###     意义：JWT 是无状态的，若只在登录那一刻查一次状态，
+###     禁用某人后他手上的 Token 在过期前照样能用。所以拦截器改成**每请求都查 t_user.status**。
+###     ⚠️ 需要先跑过第 4 条「登录并自动保存 token」拿到 {{token}}。
+GET http://localhost:8080/api/work-orders
+Authorization: Bearer {{token}}
+
+### V8 【🔴 必须紧接着做】恢复学生账号
+PUT http://localhost:8080/api/admin/users/2023001001/status
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{
+  "status": "ACTIVE"
+}
+
+### V9 【🔴 改动数据】重置密码
+###    响应里**不带明文**——管理员只知道规则就够了（吐回明文会进日志、留在浏览器）。
+###    默认密码 = 学号后 6 位，所以这里重置后 2023001001 的密码变成 001001。
+POST http://localhost:8080/api/admin/users/2023001001/reset-password
+Authorization: Bearer {{adminToken}}
+
+### V10 禁用「自己」→ 400（防止管理员把自己锁在系统外）
+###     路径里换成你当前登录的管理员学号；手一滑把自己禁了，下一个请求就 403，再也进不来后台。
+PUT http://localhost:8080/api/admin/users/2023003001/status
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{
+  "status": "DISABLED"
+}
+
+### V11 返回结构 & 失败路径
+###    列表元素：{userId, userName, userType, status, subscribeStatus, createTime, lastLoginTime}
+###    （**没有 password**；改状态的 data 是单个用户对象，重置密码的 data 是 null）
+###    · 匿名调 V1~V6 / V9             → HTTP 401
+###    · 学生或干事调 V1~V10           → 403「仅管理员可…」
+###    · userType / status 传非枚举值  → 400
+###    · status 缺失或空               → 400「状态不能为空」
+###    · 禁用/重置不存在的学号         → 404「用户不存在」
+###    · 管理员改自己的状态            → 400「不能修改自己的账号状态，请让其他管理员操作」
+###    · 重置密码后再用旧密码登录      → 401（新密码 = 学号后 6 位）
+###    ⚠️ 重置密码**不会**让该用户已发出的 Token 失效（JWT 无状态）；
+###       而**禁用是立即生效的**（拦截器每请求查库）——一软一硬，别混。
+
+####################################################################
+# W 组：后台工单搜索（#50）—— GET /api/admin/work-orders/search，仅管理员
+#
+# 🔴 跟学生端 /api/work-orders 不是一回事：那个按角色做数据隔离（学生只看自己的），
+#    这个是**管理员查账用的全站检索**，不受隔离，一共 9 个检索维度，全都可选。
+#
+# 🔴 跑之前先跑一次「㉔ 管理员登录」拿到 {{adminToken}}（IDE 重启后变量会丢，那是 401 不是接口坏了）。
+#    W17 还要用学生的 {{token}}（第 4 条「登录并自动保存 token」存的）。
+#
+# ✅ W11「只看命中敏感词」已经从"永远查空"变成可用了：提交 / 再次咨询时已接上敏感词检测
+#    （文档 §4 第 4 步），命中就把新单 is_flagged 置 1。想从零复现一遍，按文末的 X 组走。
+# ⚠️ W12「只看被合并的重复单」查的是 duplicate_of_order_id —— 那是**自动重复检测**留下的标记
+#    （§4 第 5 步，要 jieba 分词做关键词交集，尚未实现），所以目前也多半是空的。
+#    被 MERGE 合并掉的单走的是**另一列** main_order_id，因此不会出现在 W12 里 —— 这点文档没写清。
+####################################################################
+
+### W1 全站检索（不传任何条件 = 全部工单，默认 page=1 / pageSize=20）
+###    返回 { total, page, pageSize, list }；total 应等于库里工单总条数。
+GET http://localhost:8080/api/admin/work-orders/search
+Authorization: Bearer {{adminToken}}
+
+### W2 翻页（pageSize=5）
+###    判据：第 1 页必须有数据；第 1 页和第 2 页不能有重复的工单号。
+GET http://localhost:8080/api/admin/work-orders/search?page=2&pageSize=5
+Authorization: Bearer {{adminToken}}
+
+### W3 按提交人学号搜（精确）
+GET http://localhost:8080/api/admin/work-orders/search?userId=2023001001
+Authorization: Bearer {{adminToken}}
+
+### W4 按提交人姓名搜（模糊，搜「测试」能命中）
+###    ⚠️ 中文参数在 URL 里要百分号编码；IDEA 会自动处理，直接粘中文也行。
+GET http://localhost:8080/api/admin/work-orders/search?userName=测试
+Authorization: Bearer {{adminToken}}
+
+### W5 按负责人工号搜（精确）—— 只看 2023002001 处理的单
+GET http://localhost:8080/api/admin/work-orders/search?handlerId=2023002001
+Authorization: Bearer {{adminToken}}
+
+### W6 按负责人姓名搜（模糊）
+###    注意：结果里 handlerId 为 null 的行不会出现（未接单的单没有被搜索的负责人姓名）。
+GET http://localhost:8080/api/admin/work-orders/search?handlerName=干事
+Authorization: Bearer {{adminToken}}
+
+### W7 按状态搜（可逗号分隔多个）
+GET http://localhost:8080/api/admin/work-orders/search?status=PENDING,CLOSED
+Authorization: Bearer {{adminToken}}
+
+### W8 按分类搜
+GET http://localhost:8080/api/admin/work-orders/search?category=学时录入
+Authorization: Bearer {{adminToken}}
+
+### W9 按内容关键词搜（模糊匹配 content）
+GET http://localhost:8080/api/admin/work-orders/search?keyword=学时
+Authorization: Bearer {{adminToken}}
+
+### W10 按提交日期区间搜（yyyy-MM-dd，**截止日整天都算在内**）
+###     这两天的差值不要设太大，保证能命中一些单即可。
+GET http://localhost:8080/api/admin/work-orders/search?startDate=2026-09-20&endDate=2026-09-26
+Authorization: Bearer {{adminToken}}
+
+### W11 只看命中敏感词的工单
+###     ✅ 这个维度现在是活的：库里已经有打上标的单（验证时留下的），所以多半能返回几条。
+###     想从零复现一条，按文末 X 组走一遍就有了。
+###     反过来 isFlagged=false 应该返回**其余**单 —— 说明这个开关双向都生效。
+GET http://localhost:8080/api/admin/work-orders/search?isFlagged=true
+Authorization: Bearer {{adminToken}}
+
+### W12 只看"自动判定为重复"的单（duplicate_of_order_id 非空）
+###     ⚠️ 目前多半是空的：这一列由 §4 第 5 步的**重复检测**（jieba 分词算关键词交集）来填，
+###     而那一步还没实现。注意别和被 MERGE 合并的单搞混 —— 那些单填的是 main_order_id。
+GET http://localhost:8080/api/admin/work-orders/search?isDuplicate=true
+Authorization: Bearer {{adminToken}}
+
+### W13 组合条件（分类 + 状态 + 负责人）
+GET http://localhost:8080/api/admin/work-orders/search?category=学时录入&status=CLOSED&handlerId=2023002001
+Authorization: Bearer {{adminToken}}
+
+### W14 非法的 status → 400
+###     status 是固定 ENUM，传个不存在的值说明前端写错了，应该明确报出来，而不是静默返回空列表。
+GET http://localhost:8080/api/admin/work-orders/search?status=NOT_A_STATUS
+Authorization: Bearer {{adminToken}}
+
+### W15 日期格式错 → 400
+###     🔴 这里最容易踩的坑：如果参数直接声明成 LocalDate 交给 Spring 转换，格式错会抛
+###     MethodArgumentTypeMismatchException，全局异常处理器没覆盖 → **500**。
+###     所以后端收的是 String 自己解析，才能给出"日期格式不正确"这种能看懂的 400。
+GET http://localhost:8080/api/admin/work-orders/search?startDate=2026-13-99
+Authorization: Bearer {{adminToken}}
+
+### W16 起始日期晚于截止日期 → 400
+GET http://localhost:8080/api/admin/work-orders/search?startDate=2026-09-26&endDate=2026-09-15
+Authorization: Bearer {{adminToken}}
+
+### W17 布尔开关传非法值 → 400（不是 500）
+GET http://localhost:8080/api/admin/work-orders/search?isFlagged=yes
+Authorization: Bearer {{adminToken}}
+
+### W18 学生来搜 → 403
+###     （拦截器只管"带没带 Token"，是不是管理员由 Service 判。）
+GET http://localhost:8080/api/admin/work-orders/search
+Authorization: Bearer {{token}}
+
+### W19 匿名来搜 → HTTP 401
+GET http://localhost:8080/api/admin/work-orders/search
+
+### W20 返回结构 & 说明
+###    list 元素 15 个字段：workOrderId, userId, userName, category, content, status, statusLabel,
+###                         handlerId, handlerName, isFlagged, duplicateOfOrderId,
+###                         createTime, acceptTime, replyTime, finishTime
+###    （acceptTime / replyTime / finishTime 在没走到那一步时是 null —— 正常）
+###    · 匿名 → HTTP 401；学生 / 干事 → 403「仅管理员可搜索工单」
+###    · status 传非枚举值 → 400；status 多值里混一个非法值 → 400
+###    · startDate / endDate 格式不是 yyyy-MM-dd → 400；起始晚于截止 → 400
+###    · isFlagged / isDuplicate 只能 true 或 false → 其它值 400
+###    · 搜不到东西时返回 code=0 + 空列表（**不是 404**）
+###    ⚠️ 两处刻意的差异，都记在案：
+###       ① statusLabel 项目统一用「已关闭」，而文档 §10.7 的示例写的是「已完结」——
+###          同一个 API 里同一个状态出现两种叫法更糟，所以跟随项目现状。
+###       ② 文档的示例 SQL 用 LEFT JOIN t_user 取姓名；实际 t_work_order 自己冗余存了
+###          user_name，学生端列表也一直用它，所以这里不 JOIN，少一次关联。
+
+####################################################################
+# X 组：敏感词命中打标（文档 §4 第 4 步）—— 这一步以前**没实现**，刚接上
+#
+# 它证明的就三件事：**命中就打标 / 但绝不拦截提交 / 只认"启用中"的词**。
+# 顺序：X1 → X4。⚠️ X1 里的词和 X2 正文里的词**必须是同一个字符串**（这里都是「违禁词测试」）。
+#
+# ⚠️ 本组会**留下数据**：多一个敏感词 + 一张已打标的工单。不想要就去 T1 列表里找到它的
+#    wordId，用 T4 禁用；工单可以留着（正好当示例数据）。
+# ⚠️ 本组**不适合反复跑**：X2 的 requestId 是写死的，而 t_work_order.request_id 上有 UNIQUE，
+#    第二次跑会返回 409（这就是文档要求的"幂等兜底"）。要反复验请用 target/verify-flag.py，
+#    它每次用带时间戳的新 requestId。
+####################################################################
+
+### X1 【先做这一步】加一个测试敏感词（仅管理员）
+###     记住这个词：违禁词测试
+POST http://localhost:8080/api/admin/sensitive-words
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{
+  "word": "违禁词测试"
+}
+
+### X2 提交一条**正文里故意包含**那个词的工单（学生 Token）
+###     🔴 关键判据：返回 code=0 —— **仍然提交成功**。
+###     敏感词检测是"打个标记等人复核"，**不是提交闸门**，绝不能把学生的单拦在外面。
+POST http://localhost:8080/api/work-orders
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "category": "学时录入",
+  "content": "我随手写了 违禁词测试 这几个字，应该被打上标记但仍然提交成功。",
+  "requestId": "manual-flag-demo-0001",
+  "attachmentIds": []
+}
+
+### X3 管理员搜 ?isFlagged=true → 刚提交的那张单应该在列表里（最新的排最前）
+GET http://localhost:8080/api/admin/work-orders/search?isFlagged=true&pageSize=5
+Authorization: Bearer {{adminToken}}
+
+### X4 按关键词搜也能找到它（顺带验证 content 模糊匹配）
+###     返回的 list[0].isFlagged 应该是 true。
+GET http://localhost:8080/api/admin/work-orders/search?keyword=违禁词测试
+Authorization: Bearer {{adminToken}}
+
+### X5 说明 & 边界（看清楚它做了什么、没做什么）
+###    · 命中的效果：新单 t_work_order.is_flagged=1；工单详情的 isFlagged 也是 true。
+###      ⚠️ 但**提交响应里不提示"你命中了敏感词"** —— 刻意不告诉提交人。
+###         否则等于告诉他"哪个词会被标记"，敏感词库就成了提示器。
+###    · 扫的是 content，**contains 语义**（`content LIKE '%词%'`），只扫 status='ACTIVE' 的词。
+###      代价：没有词边界（英文 part 会命中 party）；中文场景基本无所谓。
+###      大小写不敏感（表排序规则 utf8mb4_unicode_ci），英文词大写小写都算命中。
+###    · 生效范围：**提交 + 再次咨询**两处 —— 这两处都要 INSERT 一张新工单，有地方存这个标记。
+###      ⚠️ 文档在「回复」「追问」两步也写了"敏感词检测"，但**消息表没有 is_flagged 列**，
+###         命中之后干什么文档没定义 —— 所以那两处**故意没做**，等定好规则再补。
+###    · 自己动手验另两条：
+###      ① 禁用后不再命中：T1 里找到 wordId → T4 禁用 → 再跑一次 X2（**换掉 requestId**）
+###         → 新单的 isFlagged 应该是 false；
+###      ② 干净内容不误报：把 X2 正文里那几个字删掉再提交 → isFlagged=false。
+
+####################################################################
+# Y 组：数据统计（文档 §10.4 / 接口 #45、#46）
+#
+# 两个接口，都只有管理员能调，都按 create_time 的日期区间过滤（不传 = 全时段）。
+# 断言看点：**接口算出来的数，要跟库里同条件算出来的数对得上**。
+#   · 手工看的时候，把返回的 totalTickets 跟 `SELECT COUNT(*) FROM t_work_order`
+#     比一比就知道口径对不对。
+#   · Y1 不传日期、Y7 也不传日期 —— 这两条最普通，但恰恰是最容易写错的分支
+#     （staff-workload 的 SQL 自带 `handler_id IS NOT NULL`，拼接时一不小心就变成两个 WHERE）。
+####################################################################
+
+### Y1 统计总览（不传日期 = 全部工单）
+###     返回 6 个字段：totalTickets / duplicateRate / statusDistribution /
+###                    categoryDistribution / avgResponseMinutes / avgCloseMinutes
+###     两个分布**永远给满 5 个键**（某档为 0 也在，前端画图不用自己补图例）。
+GET http://localhost:8080/api/admin/statistics/overview
+Authorization: Bearer {{adminToken}}
+
+### Y2 只传 startDate（只统计「今天」及以后）
+###     对照：SELECT COUNT(*) FROM t_work_order WHERE create_time >= CURDATE();
+GET http://localhost:8080/api/admin/statistics/overview?startDate=2026-09-26
+Authorization: Bearer {{adminToken}}
+
+### Y3 只传 endDate（只统计到「昨天」为止）
+###     🔴 看重点：**截止日整天都算在内**。
+###        接口用的是 `create_time >= 起始日 00:00` 且 `create_time < 次日 00:00`，
+###        而文档写的 `BETWEEN ? AND ?` 传日期会把两端都当成 00:00:00，
+###        结果截止日那一整天几乎全被丢掉。这一处**故意偏离文档**。
+###     对照：SELECT COUNT(*) FROM t_work_order WHERE create_time < CURDATE();
+GET http://localhost:8080/api/admin/statistics/overview?endDate=2026-09-25
+Authorization: Bearer {{adminToken}}
+
+### Y4 同一天区间（起 = 止 = 某天）→ 当天全部
+###     对照：SELECT COUNT(*) FROM t_work_order
+###           WHERE create_time >= '2026-09-15 00:00:00' AND create_time < '2026-09-16 00:00:00';
+GET http://localhost:8080/api/admin/statistics/overview?startDate=2026-09-15&endDate=2026-09-15
+Authorization: Bearer {{adminToken}}
+
+### Y5 空区间（一条都没有的日期）→ 全 0，而不是 500
+###     🔴 这条验的是"兜底"：没有数据时 AVG(...) 会返回 NULL，
+###        总量为 0 时"重复单 / 总量"会**除零**。返回应该是
+###        totalTickets=0、duplicateRate=0、两个分布仍是满 5 个键且值全 0、两个平均值 0。
+GET http://localhost:8080/api/admin/statistics/overview?startDate=2000-01-01&endDate=2000-01-01
+Authorization: Bearer {{adminToken}}
+
+### Y6 参数错误 → 400（不是 500）
+###     日期格式错（收 String 自己解析，所以能干净地给 400）
+GET http://localhost:8080/api/admin/statistics/overview?startDate=20260915
+Authorization: Bearer {{adminToken}}
+
+### Y6.1 起始日期晚于截止日期 → 400
+GET http://localhost:8080/api/admin/statistics/overview?startDate=2026-09-26&endDate=2026-09-15
+Authorization: Bearer {{adminToken}}
+
+### Y7 【本组重点】干事工作量（**不传日期**）
+###     返回的是**一个数组**（这个接口没有分页参数）：
+###       [ { handlerId, handlerName, total, closedCount, avgCloseMinutes }, ... ]
+###     排序：total 从大到小，单量相同时按 handler_id 升序（顺序稳定，不会两次请求来回跳）。
+###     🔴 传不传日期都要正常 —— 这一条就是防"拼接时出现两个 WHERE"的回归用例。
+GET http://localhost:8080/api/admin/statistics/staff-workload
+Authorization: Bearer {{adminToken}}
+
+### Y8 干事工作量（带日期区间）
+GET http://localhost:8080/api/admin/statistics/staff-workload?startDate=2026-09-15&endDate=2026-09-15
+Authorization: Bearer {{adminToken}}
+
+### Y9 权限：学生来调 → 403（换成管理员 Token 才会返回数据）
+###     匿名（删掉 Authorization 这一行）会得到 401 —— 同类用例见 A 组，这里不重复展开。
+GET http://localhost:8080/api/admin/statistics/overview
+Authorization: Bearer {{token}}
+
+### Y10 说明 & 口径（看清楚"数是怎么算出来的"）
+###    · 日期区间口径：`create_time >= 起始日 00:00` 且 `create_time < 次日 00:00`
+###      —— 截止日整天都算。起止都可选，都不传 = 全时段（不会偷偷给你个默认 7 天）。
+###    · duplicateRate = 重复单 / 总量，保留 2 位小数；总量为 0 时给 0（不除零）。
+###      ⚠️ 重复单的口径是 `duplicate_of_order_id IS NOT NULL`。
+###         而**被合并的单（MERGE）填的是 main_order_id，不是这个字段** ——
+###         两回事，别混。所以现在这个值通常是 0。
+###    · avgResponseMinutes = 提交 → 首次回复，**只算回复过的那批单**
+###      （AVG 会自动跳过 reply_time 为 NULL 的行，文档 SQL 也是这么写的）。
+###    · avgCloseMinutes = 提交 → 完结，**只算已完结的那批单**。返回整数分钟。
+###    · staff-workload 的 avgCloseMinutes = 受理 → 完结，
+###      ⚠️ 同样是"**已完结那些单**的平均"，不是"这个干事所有单的平均"
+###      ——文档 SQL 就是这么写的，但很容易被误读成"效率低"，这里说清楚。
+###    · 字段名说明：文档 §10.4 只给了 SQL、**没给这个接口的响应示例**，
+###      所以 handlerId / handlerName / total / closedCount / avgCloseMinutes
+###      是照 SQL 列名转成驼峰定的。要改只动 StaffWorkloadItem 一个类。
+###    · t_work_order.category 是中文分类，所以 categoryDistribution 的键是中文，这是正常的。
+
+####################################################################
+# Z 组：导出 Excel（文档 §10.5 / 接口 #47）
+#
+# ⚠️ 这一组**和别组不一样**：成功时返回的**不是 JSON，而是 .xlsx 文件流**。
+#    IDEA 里点下去通常不会显示内容（它是二进制），要看结果请：
+#      · 用浏览器打开这个 URL（会直接下载），或
+#      · curl 存成文件：curl --noproxy '*' -H "Authorization: Bearer <管理员Token>" \
+#          "http://localhost:8080/api/admin/export/work-orders?status=CLOSED" -o out.xlsx
+#      · 或跑 target/verify-export.py（它会把 xlsx 拆开，逐格和数据库对）
+#    **失败时仍然返回 JSON**（Result 结构），所以"参数写错"在 IDEA 里反而看得见。
+#
+# 导出和 #50 搜索**共用同一套筛选条件**（同一段 SQL 拼装），
+# 所以不会出现"列表能筛、导出筛不出来"这种事。
+####################################################################
+
+### Z1 导出全部工单（不传任何条件）→ HTTP 200 + xlsx 文件流
+###     文件名形如 work-orders-20260927-221101.xlsx
+GET http://localhost:8080/api/admin/export/work-orders
+Authorization: Bearer {{adminToken}}
+
+### Z2 只导出「已关闭」的（status 同 #50，可逗号分隔多个）
+GET http://localhost:8080/api/admin/export/work-orders?status=CLOSED
+Authorization: Bearer {{adminToken}}
+
+### Z3 只导出「学时录入」分类
+GET http://localhost:8080/api/admin/export/work-orders?category=学时录入
+Authorization: Bearer {{adminToken}}
+
+### Z4 按提交日期区间导出
+###     🔴 **截止日整天都算在内**（同 #50 的口径：>= 起始日 00:00 且 < 次日 00:00）。
+GET http://localhost:8080/api/admin/export/work-orders?startDate=2026-09-15&endDate=2026-09-15
+Authorization: Bearer {{adminToken}}
+
+### Z5 组合条件（状态 + 分类）
+GET http://localhost:8080/api/admin/export/work-orders?status=CLOSED&category=学时录入
+Authorization: Bearer {{adminToken}}
+
+### Z6 参数写错 → 400（**这次返回的是 JSON**，因为失败走的是 Result 约定）
+GET http://localhost:8080/api/admin/export/work-orders?startDate=20260915
+Authorization: Bearer {{adminToken}}
+
+### Z6.1 起始日期晚于截止日期 → 400
+GET http://localhost:8080/api/admin/export/work-orders?startDate=2026-09-26&endDate=2026-09-15
+Authorization: Bearer {{adminToken}}
+
+### Z7 学生来导出 → 403（同样是 JSON，不是文件）
+###     匿名（删掉 Authorization 这一行）的用例见 A 组，这里不重复展开。
+GET http://localhost:8080/api/admin/export/work-orders
+Authorization: Bearer {{token}}
+
+### Z8 说明 & 边界
+###    · 表格 15 列，和 #50 返回的 15 个字段一一对应：
+###      工单号 / 提交人学号 / 提交人姓名 / 分类 / 内容 / 状态(中文) / 状态代码 /
+###      负责人工号 / 负责人姓名 / 是否命中敏感词 / 重复单指向 /
+###      提交时间 / 受理时间 / 首次回复时间 / 完结时间
+###      （状态给两列：中文给人看，代码给二次统计/审计用）
+###    · 首行冻结；内容是长文本，那一列开了自动换行；空值一律**空单元格**（不写 "null"）。
+###    · 排序和列表一致：提交时间倒序（同一秒的按工单号倒序，顺序稳定）。
+###    · 筛出 0 条时**仍然是合法 xlsx**（只有表头），不是 500 也不是 JSON。
+###    · **每个成功的导出都会写一条审计**：
+###        operation_type='EXPORT'、target_type='WORK_ORDER'、target_id='BATCH'（批量哨兵）、
+###        operation_content='work_orders: startDate=.. endDate=.. status=.. category=.. rows=N'。
+###      ⚠️ 参数错 / 无权限的导出**不写审计** —— 只在操作真正生效后记。
+###      想核对：SELECT * FROM t_operation_log WHERE operation_type='EXPORT' ORDER BY log_id DESC;
+###    · ⚠️ 查询参数直接复用了 #50 的 WorkOrderSearchQuery，所以除了文档列出的
+###      startDate/endDate/status/category，还额外接受 workOrderId / userId / keyword /
+###      isFlagged 等（有意的超集，好处是两处条件永远一致）；
+###      另外 page / pageSize 传了也**不生效**（导出不分页）。
+###    · ⚠️ 没有导出条数上限（文档没规定）。数据涨到几万条时要换 SXSSFWorkbook 流式写，
+###      否则全量塞内存会吃光堆。现在几百条量级没问题。
+
+####################################################################
+# E 组：幂等 requestId（⑧③ —— Redis SETNX 防重复提交）
+#
+# 同一张单被提交两遍，常见原因有三种：
+#   ① 用户手抖点了两下；② 前端超时自动重试；
+#   ③ 后端写库成功、响应却没回到前端（网络断 / 进程被杀），用户又点了一次。
+# 前端的做法是给**每一次点击**生成一个 requestId（UUID），重试时沿用同一个；
+# 后端就用它判断"这是不是一个重复请求"。
+#
+# 三条规则（设计文档 §1.11）：
+#   · 抢锁：`SET idempotent:{requestId} PROCESSING NX EX 60`，抢到的那个干活，
+#     没抢到的返回 409「请求正在处理中」——**并发重复提交在这一步就被挡住了**；
+#   · 重放：成功之后 `SET idempotent:{requestId}:result {...} EX 3600`，
+#     之后同 requestId 的请求直接**重放**这份结果（不新建单、不重复写审计）；
+#   · 指纹：缓存里存了"谁 + 接口 + 参数"的 SHA-256。requestId 相同但参数不同
+#     ⇒ 前端把 ID 用串了 ⇒ 409 IDEMPOTENCY_CONFLICT，**绝不把上次的结果塞过去**。
+# 数据库 UNIQUE(request_id) 仍是最后一道兜底：Redis 不落盘（重启即丢），
+# 缓存没了时靠它 + 查原单来恢复，效果同样是"返回首次结果"，而不是报错。
+#
+# ⚠️ requestId 是**选填**的：不传就按老行为走（不做幂等），老客户端不受影响。
+# ⚠️ 下面把 requestId 写成固定值，就是为了让你**手点两次能亲眼看到重放**。
+# 🔴 **先跑 E0**（自带登录，把 {{token}} 填上）。不跑登录的话变量没被替换，
+#    IDEA 会直接把请求标成「未替换的变量」，请求根本发不出去 —— 这是本文件的通用坑。
+####################################################################
+
+### E0 学生登录（自动存下 {{token}}）→ code=0
+###     特意放在组内：这样 E 组可以单独从文件末尾点起来，不用先去上面找登录那一块。
+POST http://localhost:8080/api/auth/login
+Content-Type: application/json
+
+{
+  "userId": "2023001001",
+  "password": "123456"
+}
+
+> {%
+    client.global.set("token", response.body.data.token);
+%}
+
+### E1 学生提交工单（带 requestId）→ code=0
+###     记下返回里的 workOrderId，E2 要拿它比对
+POST http://localhost:8080/api/work-orders
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "category": "其他",
+  "content": "E 组幂等验证用单，可忽略",
+  "requestId": "e-idem-0001",
+  "attachmentIds": []
+}
+
+### E2 同一个 requestId + 完全一样的内容再提交一次 → code=0，且**单号与 E1 一模一样**
+###     这就是「幂等重放」：第二次没有新建单，只是把第一次的结果原样还给你。
+###     🔴 手工验证要点：把 E1 / E2 返回的 workOrderId 对一下，相同才对。
+POST http://localhost:8080/api/work-orders
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "category": "其他",
+  "content": "E 组幂等验证用单，可忽略",
+  "requestId": "e-idem-0001",
+  "attachmentIds": []
+}
+
+### E3 同一个 requestId 但**换了内容** → 409 IDEMPOTENCY_CONFLICT
+###     这不是"同一次请求的重试"，而是前端复用了 ID，必须拒绝。
+POST http://localhost:8080/api/work-orders
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "category": "其他",
+  "content": "E 组幂等验证：这条内容不一样",
+  "requestId": "e-idem-0001",
+  "attachmentIds": []
+}
+
+### E4 换一个全新的 requestId → code=0
+###     说明幂等只认 requestId，不会把"内容相同但 requestId 不同"的两单误判成重复。
+POST http://localhost:8080/api/work-orders
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "category": "其他",
+  "content": "E 组幂等验证用单，可忽略",
+  "requestId": "e-idem-0002",
+  "attachmentIds": []
+}
+
+### E5 不传 requestId → code=0（选填；不传就按老行为直接建单）
+POST http://localhost:8080/api/work-orders
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "category": "其他",
+  "content": "E 组幂等验证：这条没带 requestId"
+}
+
+### E6 说明 & 边界
+###    · 幂等对**四个写接口**都生效：提交工单 / 回复 / 追问 / 再次咨询
+###      （请求体里都有选填的 requestId 字段）。它们的重放行为与 E1-E3 完全一样，
+###      这里不重复贴，交给 target/verify-idempotent.py 自动验（含并发与缓存丢失两个场景）。
+###    · Redis 里的两个 key：
+###        idempotent:{requestId}        = PROCESSING，60 秒过期（只用来挡并发）
+###        idempotent:{requestId}:result = 首次结果 + 请求指纹，1 小时过期
+###      想手工看：`python target/redis-cli.py KEYS "idempotent:*"`（项目自带的小工具，见 B 组说明）
+###    · 业务失败（参数错 / 权限不够 / 状态冲突）时锁会**立刻被放开**，
+###      否则你改好参数再用同一个 requestId 重试，会被自己刚才那把锁挡住 60 秒。
+###    · ⚠️ Redis 挂了时这几个接口会**直接报错**（消息里写着「幂等校验失败：Redis 不可用」），
+###      **不做静默降级** —— 降级等于偷偷放行重复提交，那是更坏的结果。启动方法见 R 组。
+###    · ⚠️ 只用了两个 key，不会无限增长：锁 60 秒、结果 1 小时，到期自动消失。
+
+####################################################################
+# B 组：登出黑名单换 Redis（⑧④ —— 登出后 Token 立刻作废，且重启/多实例都挡得住）
+#
+# 以前黑名单是**进程内存里的一个 Set**，两个毛病：
+#   ① 服务一重启就清空 —— 刚刚登出作废的 Token 又能接着用；
+#   ② 多台服务器各管各的 —— 在 A 机器登出，下个请求转到 B 机器照样放行。
+#
+# 现在换成「Redis 为主 + 内存兜底」：
+#   · key  = `blacklist:token:{Token 的 SHA-256}`，value = "1"
+#     存哈希不存原文：key 恒为 64 字符（原文约 200 字符），也不把登录凭证明文摊在 Redis 里；
+#   · TTL  = 这个 Token **自己还剩多少秒**（不是固定 7 天）
+#     Token 自然过期的那一刻，黑名单项也正好一起消失，不多占一秒；
+#   · 内存兜底：本机登出过的 Token 在内存里也留一份（带同样的过期时间）。
+#     Redis 连不上时靠它挡住，既不会"全站 500"，也堵住"Redis 重启后登出的 Token 复活"。
+#
+# 🔴 **先跑 B0**（自带登录，把 {{token}} 填上）。不跑登录变量没被替换，
+#    IDEA 会直接把请求标成「未替换的变量」，请求根本发不出去 —— 本文件的通用坑。
+#
+# 📌 想在 Redis 里亲眼看这条记录（本机没装 redis-cli，用项目自带的小工具）：
+#    在项目目录下执行：
+#      python target/redis-cli.py DBSIZE                      现在一共有多少个 key
+#      python target/redis-cli.py KEYS "blacklist:token:*"     黑名单里都有谁
+#      python target/redis-cli.py GET  blacklist:token:<哈希>   值应该是 1
+#      python target/redis-cli.py TTL  blacklist:token:<哈希>   还剩多少秒自动消失
+#    <哈希> 换成 B2 之后 KEYS 打印出来的那串 64 位十六进制。
+####################################################################
+
+### B0 学生登录（自动存下 {{token}}）→ code=0
+###     特意放在组内：这样 B 组可以单独点起来，不用先去上面找登录那一块。
+POST http://localhost:8080/api/auth/login
+Content-Type: application/json
+
+{
+  "userId": "2023001001",
+  "password": "123456"
+}
+
+> {%
+    client.global.set("token", response.body.data.token);
+%}
+
+### B1 登出之前，这个 Token 是能用的 → code=0
+###     先确认它「能用」，B3 才能反证出「确实是登出把它弄失效的」。
+GET http://localhost:8080/api/work-orders
+Authorization: Bearer {{token}}
+
+### B2 登出 → code=0
+###     后端做的事：把 Token 写进 Redis 黑名单（TTL = Token 剩余寿命），并记一条 LOGOUT 审计。
+POST http://localhost:8080/api/auth/logout
+Authorization: Bearer {{token}}
+
+### B3 同一个 Token 再访问 → HTTP 401「Token 已失效，请重新登录」
+###     ★这条就是 ⑧④ 的效果。想验证「重启不丢」：跑完 B2 之后在 IDEA 里重启后端，
+###     再点这条 B3，依然是 401（换成内存版的话，重启后这里会变回 200）。
+GET http://localhost:8080/api/work-orders
+Authorization: Bearer {{token}}
+
+### B4 拿已经登出的 Token 再登出一次 → code=0「退出成功」
+###    ★登出是**幂等**的：它的语义是"把这个 Token 作废"，而"把已作废的 Token 再作废一次"
+###    结果和第一次一样，就该报成功。
+###    如果这里回 401，前端点"退出登录"会以为没退成功 → 弹错误提示 / 反复重试，
+###    而实际上它早就退干净了。用错误码把"已达成目标"报成"失败"纯属误导。
+###    （实现上：拦截器对 /api/auth/logout 这个路径放行，直接在拦截器里回成功、不再往下走 ——
+###      所以它也不会在审计表里刷出第二条 LOGOUT。）
+POST http://localhost:8080/api/auth/logout
+Authorization: Bearer {{token}}
+
+### B5 说明 & 手工核对
+###     HTTP 层只能看到「401」这个结果，Redis 里到底存了什么要用小工具看：
+###       python target/redis-cli.py KEYS "blacklist:token:*"
+###       python target/redis-cli.py TTL  blacklist:token:<KEYS 打印出来的那串 64 位哈希>
+###     重点看两件事：
+###       ① key 是 64 位十六进制 —— 证明存的是哈希，不是 Token 原文；
+###       ② TTL 是 6xxxxx 秒（接近 7 天）—— 证明它跟着 Token 的剩余寿命走。
+###     注意：B 组会把 2023001001 的这个 Token 一直拉黑到它自然过期为止。
+###     这不影响任何别的请求 —— 每个脚本/每次点登录都会拿一个新 Token。
+####################################################################
+
+####################################################################
+# C 组：敏感词缓存（⑧⑤ —— 命中检测不再每次查库，改吃 Redis 缓存）
+#
+# 这一段做的事：把「启用中的敏感词」整份装进一个 Redis SET，提交工单时拿它在**内存里**
+# 比对，省掉"每提交一张单就查一次库"。key 名按文档 §10.2：`sensitive_words:cache`。
+#
+# 三个要点：
+#   ① **缓存是整个词表**，不是"某段内容的命中结果" —— 内容千变万化不会命中，词表才几十条；
+#   ② **谁改词谁负责失效**：管理员新增/批量导入/禁用之后，缓存会被立刻删掉，
+#      下次读的时候从库里重新装一份 ⇒ 改完**立即生效**，不用等 30 分钟；
+#   ③ **Redis 挂了就退回查库**：缓存只是一份副本，库里那份才是真的 ——
+#      结果完全一样，只是慢一点，所以这条降级不会算错，也不该让全站交不了工单。
+#      （对比：单号和幂等那两处是"不能降级"的，降级会算错 —— 口径不同。）
+#
+# 🔴 **先跑 C0 和 C1**（两个登录，把 {{adminToken}} / {{token}} 填上）。
+#    不跑登录的话变量没被替换，IDEA 会直接把请求标成「未替换的变量」，请求根本发不出去。
+#
+# 📌 想在 Redis 里亲眼看这份缓存（本机没装 redis-cli，用项目自带的小工具）：
+#      python target/redis-cli.py KEYS "sensitive_words:*"          看一眼有哪些 key
+#      python target/redis-cli.py TYPE sensitive_words:cache        应该是 set
+#      python target/redis-cli.py SCARD sensitive_words:cache       词表有多少个词
+#      python target/redis-cli.py SISMEMBER sensitive_words:cache zzreplaytest   是否含这个测试词
+#      python target/redis-cli.py TTL sensitive_words:cache         还剩多少秒过期（≤ 1800）
+#    自己动手让缓存消失/重建（正好演示"失效 + 回填"）：
+#      python target/redis-cli.py DEL sensitive_words:cache         手工删掉缓存
+#      → 再点一次 C3 提交，缓存就会从库里重新装好（再 KEYS 一次又能看到它）
+####################################################################
+
+### C0 管理员登录（自动存下 {{adminToken}}）→ code=0
+POST http://localhost:8080/api/auth/login
+Content-Type: application/json
+
+{
+  "userId": "2023003001",
+  "password": "123456"
+}
+
+> {%
+    client.global.set("adminToken", response.body.data.token);
+%}
+
+### C1 学生登录（自动存下 {{token}}）→ code=0
+POST http://localhost:8080/api/auth/login
+Content-Type: application/json
+
+{
+  "userId": "2023001001",
+  "password": "123456"
+}
+
+> {%
+    client.global.set("token", response.body.data.token);
+%}
+
+### C2 管理员新增一个测试敏感词 zzreplaytest → code=0
+###     这一步同时会让缓存失效（删掉 key）。重复点也安全：
+###     第二次它已经在库里了，会回一句「该词已存在，未重复添加」，同样 code=0。
+POST http://localhost:8080/api/admin/sensitive-words
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{
+  "word": "zzreplaytest"
+}
+
+### C3 学生提交一张含该词的工单 → code=0（仍然放行，只是打个"人工复核"标记）
+###     这一次读会让缓存**从库里回填**（用上面的 redis-cli.py 就能看到它建好了）。
+POST http://localhost:8080/api/work-orders
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "category": "其他",
+  "content": "C 组敏感词缓存验证：这条里有 zzreplaytest 这个词，应该会被打上标记。",
+  "requestId": "c-cache-0001",
+  "attachmentIds": []
+}
+
+### C4 说明 & 手工核对
+###     · 上面提交完，去工单详情里能看到 `isFlagged = true`（学生自己也能看到这个标记）；
+###       换一条不含 zzreplaytest 的内容再提交，`isFlagged` 就是 false —— 说明它真的在比对，
+###       不是"永远为真"。
+###     · 「管理员禁用某个词 → 缓存立刻失效 → 再提交就不再命中」这一段需要 wordId
+###       （禁用接口是 DELETE /api/admin/sensitive-words/{wordId}），写进本文件就得引入
+###       "先看 C2 返回里的 wordId 再手填"这种隐藏依赖，所以交给自动脚本验：
+###         python target/verify-sensitive-cache.py <端口>
+###       它 28 条断言里有两条专门钉这个：
+###         D5 禁用之后缓存 key 立刻消失 + 紧接着提交不再命中（立即生效）
+###         D7 把 cache key 故意弄坏（写成 STRING）→ 仍然成功且判定正确（证明能退回查库）
+###     · ⚠️ `zzreplaytest` 会一直留在敏感词库里（跑完可以到管理端把它禁用/删掉）。
+###       用它的名字就是为了"一眼看出是测试词"，不会误伤真实内容。
+####################################################################
+
+####################################################################
+# A 组：回复 / 追问的敏感词检测（2026-10-11 新增）
+#
+#  验的是契约 #9 / #10 第 6 步那句「敏感词检测」——
+#    命中 → 把这张**工单**的 is_flagged 置 1，但**仍然放行**（只标记、不拦截）。
+#    这两个接口以前**完全没做**检测（只有提交 / 再次咨询才有）。
+#
+#  ✅ 本组**可以重复跑**：下面三个 requestId 都带 `{{$timestamp}}`（动态值，每次都不一样），
+#     所以每轮回放都会新开一张单，既不会撞幂等，也不会被上一轮留下的状态挡住。
+#     （`{{$timestamp}}` 是 IDEA http-client 原生支持的动态变量；target/replay.py 也已支持。）
+#
+#  更细的验证（四个格子 + 标记单向 + #50 闭环）：
+#     python target/verify-flag.py <端口>        ← F 组 10 条专门钉这个行为
+#
+#  A3 复用的是 C 组留下的测试词 zzreplaytest（重复加也安全，会回「该词已存在」）。
+####################################################################
+
+### A0 管理员登录（自动存下 {{adminToken}}）→ code=0
+POST http://localhost:8080/api/auth/login
+Content-Type: application/json
+
+{
+  "userId": "2023003001",
+  "password": "123456"
+}
+
+> {%
+    client.global.set("adminToken", response.body.data.token);
+%}
+
+### A1 学生登录（自动存下 {{token}}）→ code=0
+POST http://localhost:8080/api/auth/login
+Content-Type: application/json
+
+{
+  "userId": "2023001001",
+  "password": "123456"
+}
+
+> {%
+    client.global.set("token", response.body.data.token);
+%}
+
+### A2 干事登录（自动存下 {{staffToken}}）→ code=0
+POST http://localhost:8080/api/auth/login
+Content-Type: application/json
+
+{
+  "userId": "2023002001",
+  "password": "123456"
+}
+
+> {%
+    client.global.set("staffToken", response.body.data.token);
+%}
+
+### A3 确保测试敏感词 zzreplaytest 在库里 → code=0
+###     重复点也安全：第二次会回「该词已存在，未重复添加」。
+POST http://localhost:8080/api/admin/sensitive-words
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{
+  "word": "zzreplaytest"
+}
+
+### A4 学生提交一张**干净**工单（故意不含敏感词）→ code=0，并自动存 {{awo}}
+###     这张单此刻的 is_flagged 应该是 0 —— 后面才由 A6 的回复把它变成 1，
+###     这样才能证明"是回复导致打标"，而不是提交时就带了标。
+POST http://localhost:8080/api/work-orders
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "category": "其他",
+  "content": "A 组验证用：这段内容是干净的，提交时不该被打标。",
+  "requestId": "a-{{$timestamp}}-1",
+  "attachmentIds": []
+}
+
+> {%
+    client.global.set("awo", response.body.data.workOrderId);
+%}
+
+### A5 干事受理 → code=0
+POST http://localhost:8080/api/work-orders/{{awo}}/accept
+Authorization: Bearer {{staffToken}}
+Content-Type: application/json
+
+{ "version": 0 }
+
+### A6 ★核心：干事回复**含敏感词**的内容 → code=0（放行！只打标、不拦截）
+###     这是本次新增的行为：命中后 is_flagged 由 0 变 1，但回复照样发得出去。
+POST http://localhost:8080/api/work-orders/{{awo}}/reply
+Authorization: Bearer {{staffToken}}
+Content-Type: application/json
+
+{
+  "content": "这条回复里故意写了 zzreplaytest 这个词，工单应该被打上标记，但回复本身必须能发出去。",
+  "requestId": "a-{{$timestamp}}-2",
+  "attachmentIds": []
+}
+
+### A7 ★核心：学生追问**含敏感词**的内容 → code=0（同样只打标、不拦截）
+POST http://localhost:8080/api/work-orders/{{awo}}/follow-up
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "content": "追问里也写了 zzreplaytest 这个词，同样应该被打标，但追问必须能发出去。",
+  "requestId": "a-{{$timestamp}}-3",
+  "attachmentIds": []
+}
+
+### A8 说明 & 手工核对
+###     · 看工单详情：GET http://localhost:8080/api/work-orders/{{awo}}
+###       里面的 `isFlagged` 应该是 true（学生自己也能看到这个标记）。
+###     · 或者直接查库（最直观）：
+###         SELECT work_order_id, status, is_flagged FROM t_work_order WHERE work_order_id='{{awo}}';
+###       期望 is_flagged = 1。
+###     · 「干净内容不误标」那一半，本组是靠"顺序"证明的：
+###       A4 提交时是干净的、A5 受理也没改它 ⇒ A6 之前它必须还是 0。
+###       要看四个格子（回复干净 / 回复命中 / 追问干净 / 追问命中）全钉死，
+###       跑 verify-flag.py 的 F 组 —— 它还额外钉了"标记单向"和"#50 能搜出来"。
+###     · 🔴 标记是**单向**的：A6 打过标之后，再发一条干净回复也不会把 1 抹回 0。
+###       这是故意的 —— "这张单出现过敏感内容"是个历史事实，抹掉才是丢信息。
+###     · ⚠️ 同一步里的「XSS 转义」**还没实现**，是独立的一项欠账（前端已有 esc()
+###       做渲染期转义，后端入库时没转义）。本组只验敏感词那一半。
+####################################################################
+
+####################################################################
+# D 组：提交时的「疑似重复」提示（2026-10-14 新增）
+#
+#  验的是提交工单之后返回体里那个 `isDuplicate` / `duplicateOfOrderId` ——
+#    系统拿新单的**关键词**去比"还没处理完的老单"（PENDING / PROCESSING / REPLIED），
+#    撞上了就**提示**一句"可能是重复提交"，但**照样让新单建出来**（只提示、不拦截）。
+#
+#  ✅ 本组**可以重复跑**：下面两个 requestId 都带 `{{$timestamp}}`，每轮新开单。
+#
+#  🔴 判定口径（7 条，细节见 MODULES.md §八 / target/doc.txt 统一修订项第 21 条）：
+#     ① 老单只算「未完结」的：PENDING + PROCESSING + REPLIED（CLOSED 的不管）；
+#     ② 关键词 = jieba 分词后**滤掉**「停用词 + 单字 + 长度 < 8 的纯英文/数字 token」；
+#     ③ 两边关键词的**交集 ≥ 2 个**，**且** 交集 ÷ 新单关键词数 **≥ 40%**（双门槛）；
+#     ④ 命中多张老单时取**交集最多**的；一样多就取**最新的**；
+#     ⑤ 新单内容**少于 8 个字符**直接跳过检测；
+#     ⑥ 老单对比池最多扫**最近 200 张**；
+#     ⑦ 检测出错就**当"没重复"**，绝不因此拦住学生提交。
+#
+#  ✅ 为什么这条要"双门槛"：只看「交集 ≥ 2」时，一句普通的话能同时命中几十张
+#     老单（因为「请问 / 老师 / 谢谢」这类词人人都在用）。加上 40% 的比例门槛，
+#     要求新单**大部分关键词**都能在对方身上找到，才叫真重复。
+#
+#  更细的验证（54 条断言，含"脚本自己复刻算法算期望值"的自校验）：
+#     python target/verify-duplicate.py <端口>
+#
+#  🔴 本组靠"顺序"自证：D3 先建一张 A 单 ⇒ D4 再用**换汤不换药**的说法建 B 单，
+#     B 单的 isDuplicate 才是 true。反过来"D6 用 ?isDuplicate=true 去搜"能不能搜到
+#     B 单，就是这条链路的闭环证据。
+####################################################################
+
+### D0 管理员登录（自动存下 {{adminToken}}）→ code=0
+POST http://localhost:8080/api/auth/login
+Content-Type: application/json
+
+{
+  "userId": "2023003001",
+  "password": "123456"
+}
+
+> {%
+    client.global.set("adminToken", response.body.data.token);
+%}
+
+### D1 学生登录（自动存下 {{token}}）→ code=0
+POST http://localhost:8080/api/auth/login
+Content-Type: application/json
+
+{
+  "userId": "2023001001",
+  "password": "123456"
+}
+
+> {%
+    client.global.set("token", response.body.data.token);
+%}
+
+### D2 干事登录（自动存下 {{staffToken}}）→ code=0
+POST http://localhost:8080/api/auth/login
+Content-Type: application/json
+
+{
+  "userId": "2023002001",
+  "password": "123456"
+}
+
+> {%
+    client.global.set("staffToken", response.body.data.token);
+%}
+
+### D3 学生提交 A 单（主题：宿舍楼热水机连续三天不出热水）→ code=0，自动存 {{dwo}}
+###     这张单**故意留着不处理**，好让它成为 D4 的"未完结老单"。
+###     ⚠️ `isDuplicate` 可能是 true 也可能是 false —— 库里若早有同义老单，它会指向那张，
+###        这是**正确行为**（取交集最多的那张）。所以别把这条的结果当判据。
+POST http://localhost:8080/api/work-orders
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "category": "其他",
+  "content": "宿舍楼的热水机连续三天都坏了，扫码扣款了却一直不出热水，请尽快维修。",
+  "requestId": "d-{{$timestamp}}-1",
+  "attachmentIds": []
+}
+
+> {%
+    client.global.set("dwo", response.body.data.workOrderId);
+%}
+
+### D4 ★核心：学生再提交 B 单（**换虚词、不换实词**地重说同一件事）→ code=0，
+###     但返回体里 `isDuplicate` 应该是 **true**、`duplicateOfOrderId` 指向一张老单。
+###     🔴 关键：这是"提示"，不是"拦截" —— code 仍然是 0，单子照样建出来。
+###
+###     🔴 为什么必须"换虚词不换实词"（这条踩过坑，务必看懂）：
+###        本组**第一版**写的是「热水**机**坏了」对「热水**器**出故障了」，
+###        看着像同一件事，可 jieba 会把「热水机」切成 `热水 + 机坏`、
+###        把「热水器」切成 `热水器` —— **一个公共词都没有**，交集 0。
+###        而「连续三天」对「连着三天」、「扣款了」对「把钱扣了」这种改动，
+###        实词（宿舍楼 / 热水 / 三天 / 扫码 / 不出 / 维修）**全保留**，
+###        交集能到 7 个词、比例 78%，双门槛才过得去。
+###        ⇒ **算法比的是"字面上共享多少实词"，不是"你是不是在说同一件事"。**
+###
+###     ⚠️ 判据别写死具体单号：历史库里若有**更像**的老单，指向它才是对的。
+###        只要 duplicateOfOrderId 非空、且确实是一张未完结单即可。
+POST http://localhost:8080/api/work-orders
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "category": "其他",
+  "content": "宿舍楼的热水机连着三天都坏了，扫码把钱扣了却一直不出热水，麻烦尽快维修。",
+  "requestId": "d-{{$timestamp}}-2",
+  "attachmentIds": []
+}
+
+### D5 看 D3 那张单的详情（{{dwo}} = A 单）→ 顺手钉一下"标记真的存进去了"
+###     它的 `isDuplicate` 应该和 D3 提交时的返回一致（列表/详情走同一套读逻辑）。
+###     ⚠️ 想看 **B 单**（D4 那张）的详情，得手填 D4 返回体里的 workOrderId；
+###        不想手填就看 D6 的搜索结果。
+GET http://localhost:8080/api/work-orders/{{dwo}}
+Authorization: Bearer {{token}}
+
+### D6 ★闭环：管理端按「疑似重复」筛 → 刚提交的 B 单应该能被搜出来
+###     这条是"检测结果真的落库了"的硬证据 —— 只有 duplicate_of_order_id 真被写进库，
+###     这个筛选条件才可能命中。
+###     🔴 端点真名是 /api/admin/work-orders/search（不是 /api/admin/work-orders）。
+###     ⚠️ 判据是**B 单（刚提交、内容特定）在不在返回列表里**，不是"总数多少"。
+GET http://localhost:8080/api/admin/work-orders/search?isDuplicate=true
+Authorization: Bearer {{adminToken}}
+
+### D7 对照组：筛「非重复」→ 两组**不该相交**
+###     拿 D6 和 D7 返回的 workOrderId 列表对一下，交集必须是空的。
+GET http://localhost:8080/api/admin/work-orders/search?isDuplicate=false
+Authorization: Bearer {{adminToken}}
+
+### D8 说明 & 手工核对
+###     · 最直观是查库（B 单那一列的指向）：
+###         SELECT work_order_id, status, is_flagged, duplicate_of_order_id
+###           FROM t_work_order WHERE work_order_id='{{dwo}}';
+###       期望 duplicate_of_order_id 指向 D3 那张单（或更相似的历史单）。
+###     · 统计接口里的「重复率」也有连带证据：
+###         GET http://localhost:8080/api/admin/statistics/overview
+###       `duplicateRate` 不该恒为 0（本组跑完应该能看见非零）。
+###     · 🔴 这张标记是**单向的一次性判定**：判定发生在**提交的那一刻**，之后老单被
+###       关掉（CLOSED）也**不会**回头把新单的标记改掉 —— 它记录的是"当时像不像"。
+###     · 🔴 「同 requestId 必须同内容」这条幂等规则在这里同样生效：
+###       D3 / D4 用了不同的 requestId，所以是两张独立的单；若把 D4 的 requestId
+###       改成和 D3 一样，就会变成重放，而不是"第二张近义单"。
+####################################################################
+
+

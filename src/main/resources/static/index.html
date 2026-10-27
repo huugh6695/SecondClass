@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <!--
+    这行是"手机也要好用"的关键：没有它，手机上会按 980px 的假宽度渲染，
+    整页缩小成一小团、字小到看不见。
+  -->
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="description" content="第二课堂学时答疑在线服务台，提交问题、查看进度并跟踪处理结果。">
+  <meta name="theme-color" content="#1f5bd7">
+  <title>第二课堂学时答疑 · 在线服务台</title>
+  <!--
+    ⚠️ 改完前端（app.css / api.js / app.js）必须把下面两处 ?v= 的日期改成当天，
+    否则用户浏览器会用缓存里的旧文件 —— 服务器明明更新了，看到却是旧界面。
+    三处要一起改：①本文件 css 的 ?v  ②本文件 js 的 ?v  ③ js/app.js 里 import './api.js?v=...'
+  -->
+  <link rel="stylesheet" href="css/app.css?v=20261027">
+</head>
+<body>
+
+  <!--
+    整个页面只有一个空盒子。
+    所有内容都由 js/app.js 根据当前地址栏里的 #/xxx 渲染进来 —— 这叫「单页应用」：
+    点导航时页面不刷新，只是把 #app 里的内容换掉。
+  -->
+  <div id="app">
+    <div class="boot">正在加载…</div>
+  </div>
+
+  <noscript>
+    <div class="boot">这个页面需要 JavaScript 才能运行，请在浏览器里开启它。</div>
+  </noscript>
+
+  <!--
+    type="module" 是浏览器原生支持的 ES 模块，**不需要任何打包/构建工具**。
+    所以这个前端没有 npm、没有 webpack、没有构建步骤 —— 改完直接刷新浏览器就能看到效果。
+  -->
+  <script type="module" src="js/app.js?v=20261027"></script>
+</body>
+</html>

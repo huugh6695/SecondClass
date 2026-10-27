@@ -1,0 +1,61 @@
+[Unit]
+# 第二课堂学时答疑工单系统 —— systemd 托管单元
+#
+# 作用：让 Java 服务「开机自启」+「崩了自动重启」+「能看日志能重启」。
+# 这就是你在 Windows 上给 Redis 做的"装成服务"的 Linux 版本。
+#
+# 安装（详见 DEPLOY.md §9）：
+#   sudo cp second-classroom.service /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now second-classroom
+#
+Description=second-classroom (Spring Boot work order system)
+After=network-online.target mysql.service redis-server.service
+Wants=network-online.target
+# 注意：这里故意用 After 而不用 Requires ——
+# 若用 Requires，MySQL 一重启就会连带把我们重启；用 After 只保证"先起它们"，
+# 万一真的连不上，Restart=always 会兜住并重试。
+# 崩了别无限重启刷日志：5 分钟内失败超过 10 次就停下等人看（systemctl status 会显示 failed）
+StartLimitIntervalSec=300
+StartLimitBurst=10
+
+[Service]
+Type=simple
+User=scapp
+Group=scapp
+WorkingDirectory=/srv/second-classroom
+
+# 🔴 所有密码/密钥都在这个文件里，它本身**不进 git**（权限 600、属主 root）。
+#    systemd 以 root 身份读它，再降权到 scapp 跑进程，所以里面放密码是安全的。
+#    模板见 deploy/env.example。
+EnvironmentFile=/etc/second-classroom/env
+
+# -Xms/-Xmx：按服务器内存调，2G 内存的机器用下面这组就够（Spring Boot 4 + 一个连接池）
+#   ⚠️ 4G 及以上可以放宽到 -Xmx1g；1G 内存的机器请先加 swap，否则 OOM 被杀
+# -Dfile.encoding=UTF-8  日志/输出用 UTF-8，避免中文变问号
+# -Duser.timezone=Asia/Shanghai  与数据库 serverTimezone=Asia/Shanghai 对齐，否则时间差 8 小时
+# --spring.profiles.active=prod  加载 application-prod.yml
+ExecStart=/usr/bin/java \
+    -Xms256m -Xmx512m \
+    -Dfile.encoding=UTF-8 \
+    -Duser.timezone=Asia/Shanghai \
+    -jar /srv/second-classroom/second-classroom-0.0.1-SNAPSHOT.jar \
+    --spring.profiles.active=prod
+
+# systemctl stop 发的是 SIGTERM（退出码 143），别把它当成"启动失败"
+SuccessExitStatus=143
+Restart=always
+RestartSec=5
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=second-classroom
+
+# 轻度加固：不加权限、给独立的 /tmp。故意不写 ProtectSystem/ProtectHome，
+# 免得新手遇到"莫名其妙读不到文件"。
+NoNewPrivileges=true
+PrivateTmp=true
+LimitNOFILE=65536
+
+[Install]
+WantedBy=multi-user.target

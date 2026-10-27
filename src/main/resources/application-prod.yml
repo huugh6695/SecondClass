@@ -1,0 +1,91 @@
+# 生产环境配置（云服务器用）
+#
+# 用法：
+#   java -jar second-classroom-0.0.1-SNAPSHOT.jar --spring.profiles.active=prod
+#   或者不写参数，用环境变量：SPRING_PROFILES_ACTIVE=prod
+#
+# 🔴 设计原则：**这个文件里不放任何真实密码 / 密钥**。
+#    它是随 jar 一起打包的 —— 谁拿到 jar 都能解压看到内容。所以这里只写
+#    "从哪个环境变量读"，不写"值是什么"。
+#
+# 为什么另起一个文件而不是改 application.yml：
+#    本地开发（IDEA 直接 Run）继续用 application.yml，行为和以前一模一样，
+#    不会被生产改动牵连；生产走 --spring.profiles.active=prod 只覆盖掉这里列出的项。
+#
+# ⚠️ 必填的三个变量（**没设就启动失败**，这是故意的 —— 宁可起不来，也别拿着开发密钥/相对路径跑生产）：
+#      DB_PASSWORD   数据库密码
+#      JWT_SECRET    JWT 签名密钥（**必须换成新的随机 64 字节**，见部署清单）
+#      UPLOAD_DIR    附件落盘目录（**必须是绝对路径**，见下）
+#    Spring 抛的错会明确写出是哪个变量没解析出来，比如：
+#      Could not resolve placeholder 'JWT_SECRET'
+
+spring:
+  datasource:
+    # 和开发那份保持同样的参数（useSSL / serverTimezone / allowPublicKeyRetrieval），
+    # 只把 host / 库名 / 账号 / 密码换成变量 —— 不在生产悄悄改连接语义。
+    url: jdbc:mysql://${DB_HOST:127.0.0.1}:${DB_PORT:3306}/${DB_NAME:second_classroom}?useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true
+    username: ${DB_USERNAME:root}
+    password: ${DB_PASSWORD}
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    hikari:
+      connection-timeout: 3000
+      maximum-pool-size: ${DB_POOL_SIZE:10}
+
+  # Redis 地址只有这一份来源（单号 INCR / 幂等 / 黑名单 / 敏感词缓存 / 探活 全用它）
+  data:
+    redis:
+      host: ${REDIS_HOST:127.0.0.1}
+      port: ${REDIS_PORT:6379}
+      # 没设密码就是空串（本地/内网常见）；公网服务器**必须**设，见部署清单
+      password: ${REDIS_PASSWORD:}
+      timeout: 2s
+      connect-timeout: 2s
+
+  servlet:
+    multipart:
+      max-file-size: 5MB
+      max-request-size: 6MB
+
+server:
+  port: ${SERVER_PORT:8080}
+  # 生产不向外吐异常细节。业务异常本来就已经被 @ExceptionHandler 统一包成 Result 了，
+  # 这里只是把 Spring 自己的默认错误页也收干净（少暴露一点内部结构）。
+  error:
+    include-message: never
+    include-stacktrace: never
+
+# 日志落文件（服务在后台跑，没有控制台可看）+ 按大小滚动
+logging:
+  file:
+    name: ${LOG_DIR:./logs}/second-classroom.log
+  logback:
+    rollingpolicy:
+      max-file-size: 20MB
+      max-history: 14
+
+jwt:
+  # 🔴 必须用环境变量注入一个新生成的随机值。
+  #    application.yml 里那个是**开发用**的，已经进过代码仓库，等于公开 —— 拿它签生产 Token，
+  #    任何人都能自己伪造一个管理员 Token 进来。
+  secret: ${JWT_SECRET}
+  expiration: 604800            # 秒，7 天（和开发一致）
+
+app:
+  upload:
+    # 🔴 必须是**绝对路径**。用 systemd 托管时，进程的工作目录不是你放 jar 的目录，
+    #    相对路径 `./uploads` 会落到 /var/lib/... 之类意想不到的地方，甚至没写权限直接报错。
+    #    例：/srv/second-classroom/uploads
+    dir: ${UPLOAD_DIR}
+    max-file-size: 5242880      # 5MB
+    allowed-extensions: jpg,jpeg,png,gif,bmp,webp,pdf,doc,docx,xls,xlsx,ppt,pptx,txt,zip,rar
+
+  health:
+    redis-enabled: true         # 生产一定要开着，Redis 挂了 /health 会如实报 DOWN
+
+  notification:
+    enabled: true
+    scan-interval-ms: 10000
+    initial-delay-ms: 5000
+    batch-size: 100
+    max-retry: 3
+    retry-delay-seconds: 30,60,120

@@ -1,0 +1,124 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+	<modelVersion>4.0.0</modelVersion>
+	<parent>
+		<groupId>org.springframework.boot</groupId>
+		<artifactId>spring-boot-starter-parent</artifactId>
+		<version>4.1.1</version>
+		<relativePath/> <!-- lookup parent from repository -->
+	</parent>
+	<groupId>com.secondclassroom</groupId>
+	<artifactId>second-classroom</artifactId>
+	<version>0.0.1-SNAPSHOT</version>
+	<name>second-classroom</name>
+	<description>second-classroom</description>
+	<url/>
+	<licenses>
+		<license/>
+	</licenses>
+	<developers>
+		<developer/>
+	</developers>
+	<scm>
+		<connection/>
+		<developerConnection/>
+		<tag/>
+		<url/>
+	</scm>
+	<properties>
+		<java.version>17</java.version>
+	</properties>
+	<dependencies>
+		<dependency>
+			<groupId>org.springframework.boot</groupId>
+			<artifactId>spring-boot-starter-webmvc</artifactId>
+		</dependency>
+
+		<dependency>
+			<groupId>org.springframework.boot</groupId>
+			<artifactId>spring-boot-starter-jdbc</artifactId>
+		</dependency>
+
+		<dependency>
+			<groupId>com.mysql</groupId>
+			<artifactId>mysql-connector-j</artifactId>
+			<scope>runtime</scope>
+		</dependency>
+
+		<!-- Redis（⑧ 阶段接入）：单号生成用 INCR、幂等用 SETNX、登出黑名单用 SET+TTL、
+		     敏感词缓存用 SET。Boot 的 BOM 托管版本，**不用自己写 <version>**；
+		     自带 Lettuce 客户端（默认就是这个，不需要额外引 lettuce-core）。 -->
+		<dependency>
+			<groupId>org.springframework.boot</groupId>
+			<artifactId>spring-boot-starter-data-redis</artifactId>
+		</dependency>
+
+		<!-- JWT：生成/解析 Token（api 编译期，impl/jackson 运行期） -->
+		<dependency>
+			<groupId>io.jsonwebtoken</groupId>
+			<artifactId>jjwt-api</artifactId>
+			<version>0.12.6</version>
+		</dependency>
+
+		<dependency>
+			<groupId>io.jsonwebtoken</groupId>
+			<artifactId>jjwt-impl</artifactId>
+			<version>0.12.6</version>
+			<scope>runtime</scope>
+		</dependency>
+		<dependency>
+			<groupId>io.jsonwebtoken</groupId>
+			<artifactId>jjwt-jackson</artifactId>
+			<version>0.12.6</version>
+			<scope>runtime</scope>
+		</dependency>
+
+		<!-- bcrypt：密码加密/校验 -->
+		<dependency>
+			<groupId>org.mindrot</groupId>
+			<artifactId>jbcrypt</artifactId>
+			<version>0.4</version>
+		</dependency>
+
+		<!-- Excel 导出（#47）：Apache POI 生成 .xlsx
+		     ⚠️ 这不是 Spring Boot 托管的依赖（spring-boot-dependencies 里没有它），
+		        所以 <version> 必须自己写，别指望继承。
+		     ⚠️ 用 poi-ooxml 而不是 poi：
+		        · poi      只带 HSSFWorkbook → 只能生成老的 .xls（二进制格式，上限 65536 行）；
+		        · poi-ooxml 才带 XSSFWorkbook → 能生成文档要求的 .xlsx。
+		        它会把 poi、commons-compress、xmlbeans 等一起传进来。 -->
+		<dependency>
+			<groupId>org.apache.poi</groupId>
+			<artifactId>poi-ooxml</artifactId>
+			<version>5.4.1</version>
+		</dependency>
+
+		<!-- 中文分词（提交工单第 5 步「重复检测: jieba 分词」）：
+		     jieba-analysis 是结巴分词（Python 版）的 Java 移植，内置主词典，
+		     开箱即用、无需外挂字典文件，`JiebaSegmenter` 直接就能切。
+		     ⚠️ 同样不在 spring-boot-dependencies 的托管名单里，<version> 必须自己写。
+		     ⚠️ 它会传递依赖一个很老的 slf4j-api，被 Spring Boot 的版本覆盖掉，不影响使用。 -->
+		<dependency>
+			<groupId>com.huaban</groupId>
+			<artifactId>jieba-analysis</artifactId>
+			<version>1.0.2</version>
+		</dependency>
+
+		<dependency>
+			<groupId>org.springframework.boot</groupId>
+			<artifactId>spring-boot-starter-webmvc-test</artifactId>
+			<scope>test</scope>
+		</dependency>
+	</dependencies>
+
+	<build>
+		<plugins>
+			<plugin>
+				<groupId>org.springframework.boot</groupId>
+				<artifactId>spring-boot-maven-plugin</artifactId>
+			</plugin>
+		</plugins>
+	</build>
+
+</project>

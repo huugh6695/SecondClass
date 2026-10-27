@@ -1,0 +1,15 @@
+# 本地开发配置模板 —— 复制成 application-local.yml 后填入真实值。
+#
+#   copy config\application-local.yml.example config\application-local.yml
+#
+# application-local.yml 已被 .gitignore 忽略，不会被提交；本模板本身可以提交，
+# 用来告诉别人“本地需要填什么”。
+
+spring:
+  datasource:
+    # 本机 MySQL 的 root 密码（或你自己建的账号密码）
+    password: "填你的数据库密码"
+
+jwt:
+  # 本地随便一个字符串即可；**生产**必须换新值，用 openssl rand -base64 64 生成
+  secret: "填一个本地开发用的随机字符串"
