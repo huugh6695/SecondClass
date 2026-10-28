@@ -8,8 +8,8 @@ spring:
   datasource:
     url: jdbc:mysql://localhost:3306/second_classroom?useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true
     username: root
-    # 值来自 config/application-local.yml 或环境变量 DB_PASSWORD，代码里不再有明文密码
-    password: ${DB_PASSWORD:}
+    # 值来自 config/application-local.yml 或环境变量 DB_PASSWORD；同样不给默认值
+    password: ${DB_PASSWORD}
     driver-class-name: com.mysql.cj.jdbc.Driver
     hikari:
       # ⚠️ 默认 30 秒太长了。/health 要求"单项检测超时 3 秒"，
@@ -38,10 +38,11 @@ spring:
       max-request-size: 6MB
 
 # JWT 配置
-# 开发密钥放在 config/application-local.yml（不进版本库）；生产用环境变量 JWT_SECRET，
-# 且**必须**是与开发密钥不同的新随机值（见 application-prod.yml 的说明）。
+# 这里**故意不给默认值**：缺配置就启动失败，而不是悄悄用一个公开的默认密钥起来。
+#   · 本地：config/application-local.yml 提供（该文件不进版本库）
+#   · 生产：环境变量 JWT_SECRET 提供，且必须是与开发值不同的新随机值
 jwt:
-  secret: ${JWT_SECRET:}
+  secret: ${JWT_SECRET}
   expiration: 604800   # 秒，7 天
 
 # 异步通知派发：定时扫 t_notification_log 里 status='PENDING' 的记录去推送

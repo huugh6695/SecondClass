@@ -94,6 +94,8 @@ mysql -uroot -p second_classroom < deploy/seed.sql
 # 2) 准备本地凭据（不进版本库）
 copy config\application-local.yml.example config\application-local.yml
 #    然后编辑 config/application-local.yml，填入数据库密码与本地 JWT 密钥
+#    跳过这一步会启动失败并报 `Could not resolve placeholder 'JWT_SECRET'`——这是故意的：
+#    宁可起不来，也不要带着一个写死在仓库里的默认密钥跑起来。
 
 # 3) 启动
 .\mvnw.cmd spring-boot:run
@@ -115,7 +117,7 @@ java -jar second-classroom-0.0.1-SNAPSHOT.jar --spring.profiles.active=prod
 
 ## 已知不足
 
-- **没有自动化测试**：接口靠 `requests.http` 手工验收，回归靠人
+- **没有业务级自动化测试**：只有 1 个 `contextLoads` 冒烟测试；接口靠 `requests.http` 手工验收，回归靠人
 - **单机部署**：没有做多实例与文件存储的横向扩展（附件落本地磁盘）
 - **附件未做病毒扫描**，仅限制扩展名与大小
 - **通知是轮询派发**（扫 `t_notification_log` 的 PENDING），没有接入真实推送通道

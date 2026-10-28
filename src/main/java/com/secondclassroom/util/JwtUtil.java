@@ -35,8 +35,21 @@ public class JwtUtil {
      */
     public JwtUtil(@Value("${jwt.secret}") String secret,
                    @Value("${jwt.expiration}") long expirationSeconds) {
-        // hmacShaKeyFor 要求密钥至少 256 位（32 字节），我们的 secret 有 48 字节，满足
-        this.key = Keys.hmacShaKeyFor(secret.getBytes(StandardCharsets.UTF_8));
+        // 启动即校验，把「配置缺失」变成一个能直接照着修的报错，
+        // 而不是 jjwt 里那句难懂的 WeakKeyException。
+        if (secret == null || secret.isBlank()) {
+            throw new IllegalStateException(
+                    "jwt.secret 未配置：本地请复制 config/application-local.yml.example 为 "
+                            + "config/application-local.yml 并填入密钥；生产请用环境变量 JWT_SECRET 注入。");
+        }
+        byte[] keyBytes = secret.getBytes(StandardCharsets.UTF_8);
+        if (keyBytes.length < 32) {
+            // HS256/HS512 都要求密钥至少 256 位（32 字节）
+            throw new IllegalStateException(
+                    "jwt.secret 太短：至少需要 32 字节，当前只有 " + keyBytes.length
+                            + " 字节。可用 `openssl rand -base64 64` 生成一个。");
+        }
+        this.key = Keys.hmacShaKeyFor(keyBytes);
         this.expirationSeconds = expirationSeconds;
     }
 
