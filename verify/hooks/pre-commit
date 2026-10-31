@@ -1,0 +1,178 @@
+#!/usr/bin/env bash
+# ============================================================================
+# git pre-commit 钩子 —— 提交前自动检查
+#
+# 设计原则：**硬拦和软提醒分开**。
+#
+#   硬拦（exit 1）：只拦"提交了会出事"的东西 ——
+#       明文密码、私钥、超过 5MB 的大文件、被 gitignore 的本地配置。
+#
+#   软提醒（exit 0）：其余一律只打印，不阻断 ——
+#       测试记录过期、前端版本号没改、改了表却没写迁移脚本。
+#
+# 🔴 为什么必须这样分：
+#    如果"测试没重跑"也拦，你迟早会因为赶时间而用 `git commit --no-verify`。
+#    一旦养成这个习惯，真正危险的东西也会被一起绕过。
+#    所以：**只在不可逆的错误上硬拦，其余靠提示。**
+#
+# 🔴 钩子里绝对不能有 read / 交互 ——
+#    CI 或 AI 在非交互环境执行 git commit 时会直接卡死。
+#
+# 安装：bash verify/install-hooks.sh
+# 临时跳过：git commit --no-verify（不推荐，但确实需要时可用）
+# ============================================================================
+
+set -uo pipefail
+
+FAIL=0
+WARN=()
+
+red()  { printf '\033[31m%s\033[0m\n' "$*"; }
+yel()  { printf '\033[33m%s\033[0m\n' "$*"; }
+dim()  { printf '\033[2m%s\033[0m\n' "$*"; }
+
+# 暂存的「新增/修改/改名」文件（删除的不检查内容）。
+# 用 -z + read -d '' 是为了正确处理含空格/中文的文件名（本项目路径就有空格）。
+STAGED=()
+while IFS= read -r -d '' f; do
+  STAGED+=("$f")
+done < <(git diff --cached --name-only --diff-filter=ACMR -z)
+
+[ ${#STAGED[@]} -eq 0 ] && exit 0
+
+# ─────────────────────────────────────────────────────────────
+# 一、硬拦
+# ─────────────────────────────────────────────────────────────
+
+# 1. 敏感文件（本地配置、密钥、证书）。
+#    config/application-local.yml 已经在 .gitignore 里，正常加不进来；
+#    这里拦的是 `git add -f` 强行加入，或者以后有人调整了忽略规则。
+for f in "${STAGED[@]}"; do
+  case "$f" in
+    config/application-local.yml|*.pem|*.key|*.p12|*.jks|id_rsa*|id_ed25519*|.env|.env.*)
+      red "❌ 拒绝提交：$f 是敏感文件（本地配置 / 密钥 / 证书）"
+      dim "   确实要提交，请先确认内容已脱敏，然后 git commit --no-verify"
+      FAIL=1
+      ;;
+  esac
+done
+
+# 2. 大文件。
+#    这个项目打过 59MB 的 jar，一旦被 add，仓库会永久变大（历史里删不掉）。
+for f in "${STAGED[@]}"; do
+  [ -f "$f" ] || continue
+  size=$(wc -c < "$f" 2>/dev/null | tr -d ' ')
+  if [ "${size:-0}" -gt 5242880 ]; then
+    red "❌ 拒绝提交：$f 有 $((size / 1048576))MB（上限 5MB）"
+    dim "   构建产物、附件、数据库导出都不该进版本库"
+    FAIL=1
+  fi
+done
+
+# 3. 内容里有没有密钥/口令。
+#    扫描的是「本次新增的行」，不是整份文件 —— 否则历史里已经存在的行会一直报。
+ADDED="$(git diff --cached -U0 --no-color 2>/dev/null | grep -E '^\+' | grep -vE '^\+\+\+')"
+
+scan_secret() {
+  local pattern="$1" label="$2"
+  if printf '%s' "$ADDED" | grep -qE "$pattern"; then
+    red "❌ 拒绝提交：新增内容里有疑似${label}"
+    dim "   命中的行："
+    printf '%s\n' "$ADDED" | grep -E "$pattern" | head -3 | sed 's/^/     /'
+    FAIL=1
+  fi
+}
+
+scan_secret 'BEGIN [A-Z ]*PRIVATE KEY'          '私钥'
+scan_secret 'ghp_[A-Za-z0-9]{30,}'              'GitHub 个人令牌'
+scan_secret 'github_pat_[A-Za-z0-9_]{30,}'      'GitHub 细粒度令牌'
+scan_secret 'AKIA[0-9A-Z]{16}'                  'AWS Access Key'
+# 本机 MySQL 的口令（真实值，故意不写全，避免这个文件自己也变成泄露源）
+scan_secret 'jiang20[0-9]{2}'                   '本机数据库口令'
+
+if [ "$FAIL" -ne 0 ]; then
+  echo ""
+  red "提交已中止。修掉上面几项再试。"
+  exit 1
+fi
+
+# ─────────────────────────────────────────────────────────────
+# 二、软提醒（只打印，不阻断）
+# ─────────────────────────────────────────────────────────────
+
+SRC_CHANGED=0
+FRONT_CHANGED=0
+SCHEMA_CHANGED=0
+for f in "${STAGED[@]}"; do
+  case "$f" in
+    src/main/java/*|src/main/resources/*.yml) SRC_CHANGED=1 ;;
+    src/main/resources/static/css/*|src/main/resources/static/js/*) FRONT_CHANGED=1; SRC_CHANGED=1 ;;
+    schema.sql) SCHEMA_CHANGED=1 ;;
+  esac
+done
+
+# 1. 测试记录是否对应当前代码。
+if [ "$SRC_CHANGED" -eq 1 ]; then
+  HEAD_NOW="$(git rev-parse --short HEAD 2>/dev/null || echo unknown)"
+  if [ -f "verify/.last-run.json" ]; then
+    T_COMMIT="$(grep -o '"commit"[[:space:]]*:[[:space:]]*"[^"]*"' verify/.last-run.json 2>/dev/null \
+                | head -1 | sed 's/.*"\([^"]*\)"$/\1/')"
+    if [ -n "$T_COMMIT" ] && [ "$T_COMMIT" != "$HEAD_NOW" ]; then
+      WARN+=("源码有改动，但最近一次测试是 $T_COMMIT 那一版跑的（当前 $HEAD_NOW）")
+      WARN+=("  → 部署前请跑：bash verify/run-regression.sh 8117")
+    fi
+  else
+    WARN+=("源码有改动，但还没有任何测试记录")
+  fi
+fi
+
+# 2. 前端资源改了，index.html 里的 ?v= 有没有跟着改。
+#    比较的是「暂存区的 index.html」和「已提交的 index.html」里的版本号，
+#    而不是看有没有 add index.html —— 因为有人改了文件但没改版本号，等于没改。
+if [ "$FRONT_CHANGED" -eq 1 ]; then
+  NEW_V="$(git show :src/main/resources/static/index.html 2>/dev/null | grep -o '?v=[0-9]\{8\}' | head -1)"
+  OLD_V="$(git show HEAD:src/main/resources/static/index.html 2>/dev/null | grep -o '?v=[0-9]\{8\}' | head -1)"
+  if [ -n "$OLD_V" ] && [ "$NEW_V" = "$OLD_V" ]; then
+    WARN+=("改了前端资源，但 index.html 的版本号还是 ${NEW_V:-空}（没变）")
+    WARN+=("  → 三处 ?v= 要一起改（css / js / app.js 里 import 的 api.js），否则用户看到旧界面")
+  fi
+fi
+
+# 3. 改了表结构，有没有配套的迁移脚本。
+#    这条最容易被忘：schema.sql 只是"新建库时的说明书"，已有数据库不会因此改变。
+if [ "$SCHEMA_CHANGED" -eq 1 ]; then
+  HAS_MIG=0
+  for f in "${STAGED[@]}"; do
+    case "$f" in deploy/migrate-*.sql) HAS_MIG=1 ;; esac
+  done
+  if [ "$HAS_MIG" -eq 0 ]; then
+    WARN+=("改了 schema.sql，但这次没有新增 deploy/migrate-*.sql")
+    WARN+=("  → 已有的库（本地和线上）都不会自动变化，要单独写一个迁移脚本并记进 t_schema_version")
+  fi
+fi
+
+# 4. 个人材料。
+for f in "${STAGED[@]}"; do
+  case "$f" in
+    INTERVIEW.md) WARN+=("INTERVIEW.md 是个人求职材料，而这个仓库是公开的 —— 确认要提交？") ;;
+  esac
+done
+
+# ─────────────────────────────────────────────────────────────
+# 三、输出
+# ─────────────────────────────────────────────────────────────
+if [ ${#WARN[@]} -gt 0 ]; then
+  echo ""
+  yel "────────────────────────────────────────────────────────"
+  yel " 提交前提醒（不阻断，仅供确认）"
+  yel "────────────────────────────────────────────────────────"
+  for w in "${WARN[@]}"; do
+    echo "  · $w"
+  done
+  echo ""
+  dim " 确认无误就继续；需要跳过检查：git commit --no-verify"
+  yel "────────────────────────────────────────────────────────"
+  echo ""
+fi
+
+exit 0
