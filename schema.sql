@@ -286,6 +286,23 @@ CREATE TABLE t_sensitive_word (
   CONSTRAINT FK_sword_creator FOREIGN KEY (creator_id) REFERENCES t_user (user_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+-- ===================== t_schema_version =====================
+-- 数据库迁移版本记录。
+--
+-- 为什么需要它：光有 deploy/migrate-*.sql 文件，回答不了「这个库到底执行过哪些迁移」。
+-- 2026-10-31 就踩过这个坑 —— 要确认「注册功能上线了吗」，只能靠探接口和数字段去猜，
+-- 而猜不出来的是「线上库结构和代码是否匹配」。
+--
+-- 约定：每次迁移执行成功后必须插一行；用 deploy/apply-migration.sh 跑会自动插。
+-- 没有外键，放在最后，任何一次迁移都不该依赖它之外的表。
+CREATE TABLE t_schema_version (
+  version    VARCHAR(64)  NOT NULL COMMENT '版本标识，如 2026-10-31-auth-registration',
+  applied_at DATETIME     NOT NULL COMMENT '执行时间',
+  applied_by VARCHAR(64)  DEFAULT NULL COMMENT '执行人 / 主机名',
+  note       VARCHAR(255) DEFAULT NULL COMMENT '这次迁移做了什么',
+  PRIMARY KEY (version)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 SET FOREIGN_KEY_CHECKS = 1;
 
 -- =============================================================
