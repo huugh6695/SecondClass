@@ -21,7 +21,9 @@
 
 - **在线地址**：<http://<你的服务器IP>:8080>
 - **形态**：单体 Spring Boot 应用（后端接口 + 内置静态前端，打在同一个 jar 里）
-- **规模**：14 张表、58 个接口、前端 4 个文件（这三个数会随开发变化，只用来建立印象，不要当验收标准）
+- **规模**：🔴 **不写在这里**。表数、接口数、脚本数每次开发都会变，手抄必然过期（本文档就曾经
+  同时出现「13 张表」和「14 张表」两处自相矛盾）。跑 `bash verify/status.sh`，① 那节有「规模」一行，
+  实时统计。**本文只写结构，不写数量。**
 - **现状**：🔴 **不在这里写**。线上跑的是哪一版、本地测试过没过，跑 `bash verify/status.sh` 看，
   它会把「代码 / 本地构建 / 测试 / 线上 / 数据库」五个位置分别报出来，不一致的地方标红。
 
@@ -45,7 +47,7 @@ D:\basic codes\second-classroom\        ← 项目根目录（⚠️ 路径含�
 | `src/main/java/com/secondclassroom/` | **全部后端代码** | 改业务逻辑 |
 | `src/main/resources/static/` | **全部前端代码**（4 个文件） | 改界面 |
 | `src/main/resources/application*.yml` | 配置（开发 / 生产两套） | 改数据库、端口、上传目录 |
-| `schema.sql` | 建表语句（14 张表） | 加字段、加表 |
+| `schema.sql` | 建表语句（表数跑 `status.sh` 看，别手抄） | 加字段、加表 |
 | `pom.xml` | 依赖清单 | 加库 |
 | `deploy/` | **部署/运维文档与脚本** | 上线、备份、建账号 |
 
@@ -53,8 +55,9 @@ D:\basic codes\second-classroom\        ← 项目根目录（⚠️ 路径含�
 
 | 路径 | 说明 |
 |---|---|
-| `requests.http` | **153 KB 的手工测试集**（29 组请求，A/B/C/D 四组）。IDEA 里可逐条点着跑 |
-| `verify/` | **验收脚本与状态工具**：`status.sh`（查五个版本号到哪一层）、`run-regression.sh`（跑全套验收）、`lib.py` 公共库、`verify-*.py` 各模块验收。已纳入 git，不会丢 |
+| `requests.http` | **手工测试集**（分 A/B/C/D 四组）。IDEA 里可逐条点着跑 |
+| `verify/` | **验收脚本与状态工具**：`status.sh`（查运行态六个位置）、`run-regression.sh`（跑全套验收）、`session.sh`（会话交接单）、`lib.py` 公共库、`verify-*.py` 各模块验收。已纳入 git，不会丢 |
+| `docs/architecture/` | **工程与业务规则**：`CONVENTIONS.md`（分层/事务/Redis/命令行坑）、`MODULES.md`（业务规则）、`ENVIRONMENT.md`（环境与上线硬约束）、`PROCESS.md`（协作纪律）。**动代码前必读** |
 | `target/` | Maven 构建产物。🔴 **别往这里放任何需要长期保存的东西** —— `mvn clean` 会整个删掉 |
 | `logs/` | 本机运行日志 |
 | `uploads/` | 本机上传的附件 |
@@ -62,16 +65,19 @@ D:\basic codes\second-classroom\        ← 项目根目录（⚠️ 路径含�
 
 ### 1.3 后端代码分层（`src/main/java/com/secondclassroom/`）
 
-| 包 | 文件数 | 干什么 | 关键类 |
-|---|---|---|---|
-| `controller` | 18 | **只收参数、转交 service、包 `Result`**。没有业务逻辑 | `WorkOrderController`（14 个接口）、`AuthController` |
-| `service` | 18 | **全部业务逻辑在这**。写 SQL、判权限、写日志都在这一层 | `WorkOrderService`（2033 行，最核心） |
-| `dto` | 53 | 请求体 / 响应体的数据结构（纯 getter/setter） | `LoginRequest`、`WorkOrderDetailResult` |
-| `common` | 6 | 全局基础设施 | `Result`、`GlobalExceptionHandler`、`TokenBlacklist`、`IdempotencyStore` |
-| `util` | 3 | 工具类 | `JwtUtil`、`DailySeqId`（单号生成）、`WebUtil` |
-| `model` | 2 | 只有 `User`、`WorkOrder` 两个实体（其余表直接用 Map/JdbcTemplate） | — |
-| `interceptor` | 1 | `JwtInterceptor`：校验 Token、把 `userId`/`userType` 塞进 request | — |
-| `config` | 1 | `WebConfig`：注册拦截器 + 放行白名单 | — |
+| 包 | 干什么 | 关键类 |
+|---|---|---|
+| `controller` | **只收参数、转交 service、包 `Result`**。没有业务逻辑 | `WorkOrderController`（工单相关接口全在这）、`AuthController` |
+| `service` | **全部业务逻辑在这**。写 SQL、判权限、写日志都在这一层。**最厚的一层** | `WorkOrderService`（最核心，改它要格外小心） |
+| `dto` | 请求体 / 响应体的数据结构（纯 getter/setter）。**文件数最多** | `LoginRequest`、`WorkOrderDetailResult` |
+| `common` | 全局基础设施 | `Result`、`GlobalExceptionHandler`、`TokenBlacklist`、`IdempotencyStore` |
+| `util` | 工具类 | `JwtUtil`、`DailySeqId`（单号生成）、`WebUtil` |
+| `model` | 只有 `User`、`WorkOrder` 两个实体（其余表直接用 Map/JdbcTemplate） | — |
+| `interceptor` | `JwtInterceptor`：校验 Token、把 `userId`/`userType` 塞进 request | — |
+| `config` | `WebConfig`：注册拦截器 + 放行白名单 | — |
+
+> 表格里没有「文件数」——那是最容易过期的数字。想看真实的，`ls src/main/java/com/secondclassroom/*/ | wc -l`，
+> 或者看 `status.sh` 的规模行。
 
 **一句话记住分层规矩**：
 
@@ -172,7 +178,7 @@ mysql -uroot -p --default-character-set=utf8mb4 second_classroom < 输出.sql
 
 ---
 
-## 4. 数据库：13 张表
+## 4. 数据库
 
 | 表 | 作用 | 备注 |
 |---|---|---|
@@ -208,7 +214,7 @@ REPLIED（已回复）
 
 ---
 
-## 5. 接口：58 个
+## 5. 接口怎么找
 
 > 🔴 **原来的契约真源 `target/doc.txt`（80 KB）已在 2026-10-28 丢失** —— 和验收脚本一起被
 > `mvn clean` 清掉了，git 里没有备份（`target/` 被忽略）。
@@ -217,21 +223,21 @@ REPLIED（已回复）
 >
 > 1. **`controller/` + `dto/` 的 Javadoc 注释** —— 第一手依据。这个项目的注释写得比文档还细，
 >    很多地方直接标了「文档 §几」和「为什么这么写」
-> 2. **`requests.http`（153 KB、29 组）** —— 请求体的实物样例，能直接点着跑
+> 2. **`requests.http`（A/B/C/D 四组）** —— 请求体的实物样例，能直接点着跑
 > 3. `schema.sql` —— 字段类型和枚举取值
 >
 > 重建契约文档时按这个顺序抄，别凭印象补。
 
-按模块分布：
+按模块分布（**不写具体数量**——每加一个接口这里就会错一次；要精确数跑 `status.sh` 看规模行）：
 
-| 模块 | 大致接口数 | 谁能调 |
-|---|---|---|
-| 认证（登录/注册/短信验证/找回密码/改密/换手机） | 11 | 所有人或登录用户 |
-| 工单（提交/列表/详情/回复/追问/确认/关闭/接单/退回/再次咨询…） | 14 | 学生 + 干事 + 管理员（按动作区分） |
-| 附件、消息、通知 | 6 | 登录用户 |
-| 公告、FAQ、回复模板（读） | 4 | 公告/FAQ 游客可读 |
-| 健康检查 `/health` | 1 | 无需登录 |
-| 管理端（用户/工单/统计/导出/日志/敏感词/模板/公告/FAQ） | 22 | 仅 ADMIN |
+| 模块 | 谁能调 |
+|---|---|
+| 认证（登录 / 注册 / 短信验证 / 找回密码 / 改密 / 换手机） | 所有人或登录用户 |
+| 工单（提交 / 列表 / 详情 / 回复 / 追问 / 确认 / 关闭 / 接单 / 退回 / 再次咨询…） | 学生 + 干事 + 管理员（按动作区分） |
+| 附件、消息、通知 | 登录用户 |
+| 公告、FAQ、回复模板（读） | 公告 / FAQ 游客可读 |
+| 健康检查 `/health` | 无需登录 |
+| 管理端（用户 / 工单 / 统计 / 导出 / 日志 / 敏感词 / 模板 / 公告 / FAQ） | 仅 ADMIN |
 
 ### 5.1 手工测试怎么用
 
@@ -254,12 +260,14 @@ REPLIED（已回复）
 
 ```
 src/main/resources/static/
-├── index.html      1.2 KB   ← 只有一个空容器 <div id="app">，内容全靠 JS 渲染
-├── css/app.css    32 KB     ← 全部样式（1223 行，25 个带注释的章节）
+├── index.html        ← 只有一个空容器 <div id="app">，内容全靠 JS 渲染
+├── css/app.css       ← 全部样式（按章节注释分段）
 └── js/
-    ├── api.js     42 KB     ← 所有 fetch 封装，一个接口一个函数
-    └── app.js    198 KB     ← 视图 + 路由 + 交互（15 个 viewXxx() 函数）
+    ├── api.js        ← 所有 fetch 封装，一个接口一个函数
+    └── app.js        ← 视图 + 路由 + 交互（所有 viewXxx() 函数）
 ```
+
+> 不写文件大小和行数：那些每周都在变。**体积印象不重要，层次关系才重要。**
 
 ### 6.1 路由怎么工作
 
@@ -274,17 +282,20 @@ http://站点/#/admin/users  → 后台管理
 
 `app.js` 末尾的 `render()` 函数就是路由表，一个 `switch` 加几个前缀判断。**加新页面 = 加一个 `case` + 写一个 `viewXxx()`**。
 
-### 6.2 页面清单（共 17 个视图）
+### 6.2 页面清单
 
-| 学生 / 干事端（9） | 管理端（6） |
+（不数个数 —— 加一个页面这里就会错一次。看全量请直接读 `app.js` 末尾 `render()` 的 `switch`。）
+
+| 学生 / 干事端 | 管理端 |
 |---|---|
 | 登录、学生注册、找回密码、我的工单（干事看到的是「工单处理」）、工单详情、提交工单、再次咨询、消息通知、公告、常见问题、账号安全 | 后台首页、用户管理、敏感词、回复模板、数据统计、数据导出、操作日志 |
 
 ### 6.3 改前端的三条实用提示
 
 1. **样式全部在 `app.css`**，`index.html` 里一个 `style` 都没有，`app.js` 里只有 1 处内联（进度条宽度，是动态值）
-2. **类名在 `app.js` 里是硬编码的**（145 个），而且有些是拼接出来的，比如 `class="badge ${cls}"`。改 CSS 类名必须同步改 JS 里的拼接逻辑，否则**样式会突然消失但不报错**
-3. **`app.css` 里有 40 处颜色没走变量**（状态徽章的浅底色）。改主题色时这些要一起改，否则会残留旧色
+2. **类名在 `app.js` 里是硬编码的**，而且有些是拼接出来的，比如 `class="badge ${cls}"`。改 CSS 类名必须同步改 JS 里的拼接逻辑，否则**样式会突然消失但不报错**
+3. **`app.css` 里有一批颜色没走变量**（状态徽章的浅底色）。改主题色时这些要一起改，否则会残留旧色
+   （具体多少处会变，别记数字，搜一下 `#` 开头的十六进制就知道）
 
 ---
 
@@ -365,7 +376,8 @@ sql = sql.replace("WHERE", cond + " AND");   // ❌ 会拼出两个 WHERE
 
 ## 8. 怎么验证改动没把别的弄坏
 
-项目带了 **20 个 `verify-*.py` 验收脚本 + 1 个总调度 `run-regression.sh`**，都在 **`verify/`** 目录下。
+项目带了一组 `verify-*.py` 验收脚本 + 1 个总调度 `run-regression.sh`，都在 **`verify/`** 目录下。
+（脚本数量会随开发增长，**不写死数字** —— 想知道当前几个，跑 `status.sh` 看规模行。）
 
 > 🔴 **为什么从 `target/` 挪走了（2026-10-28 的真实教训）**
 >
@@ -404,7 +416,7 @@ bash verify/run-regression.sh 8117
 
 ---
 
-## 9. 线上部署（现状）
+## 9. 线上环境
 
 | 项 | 值 |
 |---|---|
@@ -474,8 +486,14 @@ ssh root@<你的服务器IP> 'chown scapp:scapp /srv/second-classroom/*.jar && s
 |---|---|---|
 | **接口契约（原真源，已丢失）** | ~~`target/doc.txt`~~ | 2026-10-28 被 `mvn clean` 清掉。改按 Controller/DTO 注释 + `requests.http` 为准（见 §5） |
 | **上线运维手册** | `deploy/DEPLOY.md` | 从买服务器到 HTTPS 全流程、故障排查、备份 |
-| 建表语句 | `schema.sql` | 13 张表 |
+| **工程约定** | `docs/architecture/CONVENTIONS.md` | 分层、拦截器、事务、Redis、命令行坑 |
+| **业务规则** | `docs/architecture/MODULES.md` | 状态机、附件、敏感词、缓存、幂等 |
+| **环境与上线硬约束** | `docs/architecture/ENVIRONMENT.md` | 本机路径、验证脚本规矩、Nginx/XFF/时区 |
+| **协作纪律** | `docs/architecture/PROCESS.md` | 请求文件规矩、破坏性动作成对做 |
+| 建表语句 | `schema.sql` | 表结构（表数跑 `status.sh`） |
 | 初始数据 | `deploy/seed.sql` | 只有 1 个管理员 |
 | 账号导入 | `deploy/README-import.md` + `gen-import-sql.bat` | 批量建号 |
-| 手工测试集 | `requests.http` | 29 组可点击执行的请求 |
-| 自动化验收 | `verify/verify-*.py` + `verify/run-regression.sh` | 接口黑盒验收（正在重建，见 §8） |
+| 手工测试集 | `requests.http` | 可点击执行的请求（分 A/B/C/D 四组） |
+| 自动化验收 | `verify/verify-*.py` + `verify/run-regression.sh` | 接口黑盒验收 |
+| 运行态自检 | `verify/status.sh` | 代码 / 构建 / 测试 / 线上 / 数据库 / 交接单 |
+| 会话交接 | `SESSION.md`（本机，不进 Git） | 上一轮停在哪、下一步、为什么没做 |
