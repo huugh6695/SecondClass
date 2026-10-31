@@ -70,27 +70,65 @@ GIT_HEAD="$(git rev-parse --short HEAD 2>/dev/null || echo unknown)"
 GIT_SUBJECT="$(git log -1 --format='%s' 2>/dev/null || true)"
 DIRTY="$(git status --porcelain 2>/dev/null | wc -l | tr -d ' ')"
 
+# 规模：这些数每次加表加接口都会变，所以不让任何人手抄进文档。
+# 端点数是「注解处数」，近似值（一个 @RequestMapping(method=...) 会被漏掉），
+# 只用来建立印象，不作为验收依据。
+COUNT_TABLES="$(grep -c 'CREATE TABLE' "$PROJECT_DIR/schema.sql" 2>/dev/null | tr -d ' ')"
+COUNT_ENDPOINTS="$(
+  grep -rhoE '@(Get|Post|Put|Delete|Patch)Mapping' "$PROJECT_DIR/src/main/java" 2>/dev/null \
+    | wc -l | tr -d ' '
+)"
+COUNT_SCRIPTS="$(ls -1 "$SCRIPT_DIR"/verify-*.py 2>/dev/null | wc -l | tr -d ' ')"
+
 # ─────────────────────────────────────────────────────────────
 # ② 本地构建
 # ─────────────────────────────────────────────────────────────
+# 🔴 为什么不再用「有没有源文件比 jar 新」当主判据（2026-10-31 改）：
+#    mtime 会被 git checkout / 编辑器批量保存 / 解压 刷成当前时间，
+#    于是永远报「需要重新打包」——喊狼来了太多次，真需要重打时也没人信。
+#
+#    改成两条：
+#      · 一定旧：jar 时间 < 最后一次提交时间 ⇒ 逻辑上不可能包含该提交（可靠，不会误报）
+#      · 只能证伪：jar 晚于提交 只说明「不比最后一次提交旧」，**不能**保证内容一致
+#    最后那个「内容到底一不一样」，交给 jar 的 SHA-256（见 ④ 与本地哈希）。
 JAR_PATH="$(ls -1 "$PROJECT_DIR"/target/*.jar 2>/dev/null | head -1)"
-JAR_TIME=""
-NEWER_FILES=0
+JAR_TIME=""; JAR_SHA=""; JAR_MTIME=0; NEWER_FILES=0
+HEAD_TS="$(git log -1 --format=%ct 2>/dev/null || echo 0)"
+# 🔴 别用 `git log --format='%m-%d %H:%M'`：%m / %d / %H 都是 git 的占位符
+#    （boundary mark / ref 名 / 完整哈希），会输出成 `>- (HEAD -> main) 604b33a…`
+#    精确到分钟的时间显示，一律从 epoch 转。
+HEAD_TIME="$(date -d "@${HEAD_TS:-0}" '+%m-%d %H:%M' 2>/dev/null || true)"
+[ "${HEAD_TS:-0}" -le 0 ] && HEAD_TIME=""
 if [ -n "${JAR_PATH:-}" ] && [ -f "$JAR_PATH" ]; then
   JAR_TIME="$(date -r "$JAR_PATH" '+%Y-%m-%d %H:%M' 2>/dev/null || echo '?')"
-  # jar 之后有没有源码被改过（.java / 配置 / 前端静态文件都算）
+  JAR_MTIME="$(date -r "$JAR_PATH" '+%s' 2>/dev/null || echo 0)"
+  JAR_SHA="$(sha256sum "$JAR_PATH" 2>/dev/null | cut -c1-16)"
+  # 这个计数只保留给「工作区有脏改动」时用：脏文件确实可能比 jar 新
   NEWER_FILES="$(
     find "$PROJECT_DIR/src/main" -newer "$JAR_PATH" -type f \
          \( -name '*.java' -o -name '*.yml' -o -name '*.css' -o -name '*.js' -o -name '*.html' \) \
          -print 2>/dev/null | wc -l | tr -d ' '
   )"
 fi
+JAR_STALE_BY_COMMIT=0
+if [ "${JAR_MTIME:-0}" -gt 0 ] && [ "${HEAD_TS:-0}" -gt 0 ]; then
+  [ "$JAR_MTIME" -lt "$HEAD_TS" ] && JAR_STALE_BY_COMMIT=1
+fi
 
 # ─────────────────────────────────────────────────────────────
 # ③ 测试记录（由 run-regression.sh 结束时写）
 # ─────────────────────────────────────────────────────────────
 LAST_RUN="$SCRIPT_DIR/.last-run.json"
-T_COMMIT=""; T_AT=""; T_SCRIPTS=""; T_PASSED=""; T_FAILED=""; T_EXIT=""
+T_COMMIT=""; T_AT=""; T_SCRIPTS=""; T_PASSED=""; T_FAILED=""; T_EXIT=""; T_DIRTY=""
+
+# 当前工作区快照。必须和 run-regression.sh 里的算法**逐字符一致**（同样是
+# `git status --porcelain` + `git diff` 拼起来取 sha256 前 12 位），否则永远对不上。
+# ⚠️ 已知局限：只哈希「已跟踪文件的改动内容」和「所有改动文件名」，
+#    未跟踪文件的**内容**没进哈希（改了未跟踪文件内容不会变）——够用，但别当密码学保证。
+DIRTY_HASH="$(
+  { git status --porcelain 2>/dev/null; git diff 2>/dev/null; } | sha256sum | cut -c1-12
+)"
+
 if [ -f "$LAST_RUN" ]; then
   # 不依赖 jq（不一定装了），用 grep + sed 取字段。
   # 这个 JSON 是我们自己写的，格式固定，够用。
@@ -104,6 +142,7 @@ if [ -f "$LAST_RUN" ]; then
   }
   T_COMMIT="$(jget commit)"
   T_AT="$(jget runAt)"
+  T_DIRTY="$(jget dirtyHash)"
   T_SCRIPTS="$(jget scripts)"
   T_PASSED="$(jget passed)"
   T_FAILED="$(jget failed)"
@@ -114,6 +153,7 @@ fi
 # ④ 线上（--offline 时跳过）
 # ─────────────────────────────────────────────────────────────
 R_JAR_TIME=""; R_STARTED=""; R_STATE=""; R_HEALTH=""; REACHABLE=0; R_ERR=""
+R_JAR_SHA=""; R_JAR_MTIME=0; R_START_EPOCH=0
 
 if [ "$OFFLINE" -eq 0 ]; then
   REMOTE_OUT="$(
@@ -122,16 +162,24 @@ if [ "$OFFLINE" -eq 0 ]; then
       JAR=$(ls -1 /srv/second-classroom/*.jar 2>/dev/null | head -1)
       if [ -n "$JAR" ]; then
         echo "JARTIME=$(date -r "$JAR" "+%Y-%m-%d %H:%M" 2>/dev/null)"
+        echo "JARSHA=$(sha256sum "$JAR" 2>/dev/null | cut -c1-16)"
+        echo "JARMT=$(date -r "$JAR" "+%s" 2>/dev/null)"
       fi
       echo "STARTED=$(systemctl show second-classroom -p ActiveEnterTimestamp --value 2>/dev/null | awk "{print \$2, substr(\$3,1,5)}")"
+      echo "STARTEPOCH=$(date -d "$(systemctl show second-classroom -p ActiveEnterTimestamp --value 2>/dev/null)" "+%s" 2>/dev/null)"
       echo "STATE=$(systemctl is-active second-classroom 2>/dev/null)"
     ' 2>/dev/null
   )"
   if [ -n "$REMOTE_OUT" ]; then
     REACHABLE=1
     R_JAR_TIME="$(printf '%s\n' "$REMOTE_OUT" | sed -n 's/^JARTIME=//p' | head -1)"
+    R_JAR_SHA="$(printf '%s\n' "$REMOTE_OUT" | sed -n 's/^JARSHA=//p' | head -1)"
+    R_JAR_MTIME="$(printf '%s\n' "$REMOTE_OUT" | sed -n 's/^JARMT=//p' | head -1)"
     R_STARTED="$(printf '%s\n' "$REMOTE_OUT" | sed -n 's/^STARTED=//p' | head -1)"
+    R_START_EPOCH="$(printf '%s\n' "$REMOTE_OUT" | sed -n 's/^STARTEPOCH=//p' | head -1)"
     R_STATE="$(printf '%s\n' "$REMOTE_OUT" | sed -n 's/^STATE=//p' | head -1)"
+    # 空值统一成 0，后面才能做整数比较（set -u 下空串比较会炸）
+    : "${R_JAR_MTIME:=0}"; : "${R_START_EPOCH:=0}"
   else
     R_ERR="连不上服务器（SSH 超时或网络不通）"
   fi
@@ -223,18 +271,38 @@ fi
 # ─────────────────────────────────────────────────────────────
 WARN=()
 [ "$DIRTY" -gt 0 ] && WARN+=("工作区有 ${DIRTY} 项未提交改动")
-[ "$NEWER_FILES" -gt 0 ] && WARN+=("本地 jar 比源码旧（${NEWER_FILES} 个文件晚于 jar），不包含最近改动")
+
+if [ -z "$JAR_TIME" ]; then
+  WARN+=("本地还没有 jar，需要先 mvn package")
+elif [ "$JAR_STALE_BY_COMMIT" -eq 1 ]; then
+  WARN+=("本地 jar 一定旧：jar 是 ${JAR_TIME}，早于最后一次提交（${HEAD_TIME}）—— 逻辑上不可能包含它")
+elif [ "$NEWER_FILES" -gt 0 ] && [ "$DIRTY" -gt 0 ]; then
+  WARN+=("工作区有改动，且有 ${NEWER_FILES} 个源文件比 jar 新 —— 需要重新打包")
+fi
+
 if [ -z "$T_COMMIT" ]; then
   WARN+=("没有测试记录：还没跑过 run-regression.sh")
 elif [ "$T_COMMIT" != "$GIT_HEAD" ]; then
   WARN+=("测试结果是 ${T_COMMIT} 那一版跑的，与当前 HEAD ${GIT_HEAD} 不一致 —— 不可用于本次验收")
+elif [ -n "${T_DIRTY:-}" ] && [ "$T_DIRTY" != "$DIRTY_HASH" ]; then
+  WARN+=("测试之后工作区又改过（测试时快照 ${T_DIRTY}，现在 ${DIRTY_HASH}）—— 这份结果不算数")
 elif [ "${T_FAILED:-0}" != "0" ]; then
   WARN+=("最近一次回归有 ${T_FAILED} 个脚本失败")
 fi
 if [ "$OFFLINE" -eq 0 ]; then
   [ "$REACHABLE" -eq 0 ] && WARN+=("${R_ERR}")
-  if [ "$REACHABLE" -eq 1 ] && [ -n "$R_JAR_TIME" ] && [ "$R_JAR_TIME" != "$JAR_TIME" ]; then
-    WARN+=("线上 jar（${R_JAR_TIME}）与本地 jar（${JAR_TIME:-无}）不一致 —— 线上不是这一版")
+  # 比哈希，不比时间。时间戳会被同分钟构建、复制、时钟差骗过；哈希不会。
+  if [ "$REACHABLE" -eq 1 ] && [ -n "$R_JAR_SHA" ] && [ -n "$JAR_SHA" ]; then
+    if [ "$R_JAR_SHA" != "$JAR_SHA" ]; then
+      WARN+=("线上 jar 与本地 jar 内容不同（哈希 ${R_JAR_SHA} vs ${JAR_SHA}）—— 线上不是这一版")
+    fi
+  elif [ "$REACHABLE" -eq 1 ] && [ -n "$R_JAR_TIME" ] && [ "$R_JAR_TIME" != "$JAR_TIME" ]; then
+    WARN+=("线上 jar（${R_JAR_TIME}）与本地（${JAR_TIME:-无}）时间不同 —— 拿不到哈希，只能按时间粗判")
+  fi
+  # 白捡的一条：jar 比服务启动还晚 ⇒ jar 被换过却没重启，进程还在跑旧的
+  if [ "${R_JAR_MTIME:-0}" -gt 0 ] && [ "${R_START_EPOCH:-0}" -gt 0 ] \
+     && [ "$R_JAR_MTIME" -gt "$R_START_EPOCH" ]; then
+    WARN+=("线上 jar 在服务启动之后被替换过（jar $(date -d "@$R_JAR_MTIME" '+%m-%d %H:%M' 2>/dev/null || echo '?') 晚于启动时间）—— 进程可能还在跑旧 jar，要重启才生效")
   fi
   [ "$R_HEALTH" != "UP" ] && WARN+=("线上健康检查：${R_HEALTH}")
   if [ -n "${AUTH_COLS_REMOTE:-}" ] && [ "$AUTH_COLS_REMOTE" != "5" ]; then
@@ -256,11 +324,14 @@ if [ "$MODE" = "json" ]; then
   printf '{\n'
   printf '  "git": {"head": "%s", "subject": "%s", "dirtyFiles": %s},\n' \
     "$GIT_HEAD" "$(printf '%s' "$GIT_SUBJECT" | sed 's/"/\\"/g')" "$DIRTY"
-  printf '  "build": {"jarTime": "%s", "newerSourceFiles": %s},\n' "${JAR_TIME:-}" "$NEWER_FILES"
-  printf '  "test": {"commit": "%s", "runAt": "%s", "scripts": "%s", "passed": "%s", "failed": "%s", "exit": "%s"},\n' \
-    "$T_COMMIT" "$T_AT" "$T_SCRIPTS" "$T_PASSED" "$T_FAILED" "$T_EXIT"
-  printf '  "remote": {"reachable": %s, "jarTime": "%s", "startedAt": "%s", "service": "%s", "health": "%s"},\n' \
-    "$REACHABLE" "${R_JAR_TIME:-}" "${R_STARTED:-}" "${R_STATE:-}" "${R_HEALTH:-}"
+  printf '  "scale": {"tables": %s, "endpointAnnotations": %s, "verifyScripts": %s},\n' \
+    "${COUNT_TABLES:-0}" "${COUNT_ENDPOINTS:-0}" "${COUNT_SCRIPTS:-0}"
+  printf '  "build": {"jarTime": "%s", "jarSha256": "%s", "staleByCommit": %s, "newerSourceFiles": %s, "headCommitTime": "%s"},\n' \
+    "${JAR_TIME:-}" "${JAR_SHA:-}" "$JAR_STALE_BY_COMMIT" "$NEWER_FILES" "${HEAD_TIME:-}"
+  printf '  "test": {"commit": "%s", "runAt": "%s", "dirtyHash": "%s", "currentDirtyHash": "%s", "scripts": "%s", "passed": "%s", "failed": "%s", "exit": "%s"},\n' \
+    "$T_COMMIT" "$T_AT" "$T_DIRTY" "$DIRTY_HASH" "$T_SCRIPTS" "$T_PASSED" "$T_FAILED" "$T_EXIT"
+  printf '  "remote": {"reachable": %s, "jarTime": "%s", "jarSha256": "%s", "startedAt": "%s", "service": "%s", "health": "%s"},\n' \
+    "$REACHABLE" "${R_JAR_TIME:-}" "${R_JAR_SHA:-}" "${R_STARTED:-}" "${R_STATE:-}" "${R_HEALTH:-}"
   printf '  "database": {"localVersion": "%s", "localAuthColumns": "%s", "remoteVersion": "%s", "remoteAuthColumns": "%s"},\n' \
     "${DB_LOCAL:-}" "${AUTH_COLS_LOCAL:-}" "${DB_REMOTE:-}" "${AUTH_COLS_REMOTE:-}"
   printf '  "handover": {"state": "%s", "commit": "%s", "ahead": %s, "days": %s, "detail": "%s"},\n' \
@@ -292,15 +363,18 @@ if [ "$DIRTY" -eq 0 ]; then
 else
   echo "   工作区       ${Y}${DIRTY} 项未提交${N}"
 fi
+echo "   规模         ${COUNT_TABLES:-?} 张表 / ${COUNT_ENDPOINTS:-?} 处端点注解 / ${COUNT_SCRIPTS:-?} 个验收脚本 ${D}（实时统计，别抄进文档）${N}"
 
 echo ""
 echo "② 本地构建"
 if [ -n "$JAR_TIME" ]; then
-  echo "   JAR          ${JAR_TIME}"
-  if [ "$NEWER_FILES" -eq 0 ]; then
-    echo "   与源码       ${G}是最新的${N}"
+  echo "   JAR          ${JAR_TIME}   ${D}sha256 ${JAR_SHA:-?}…${N}"
+  if [ "$JAR_STALE_BY_COMMIT" -eq 1 ]; then
+    echo "   与源码       ${Y}一定旧：早于最后一次提交（${HEAD_TIME}）${N}"
+  elif [ "$NEWER_FILES" -gt 0 ]; then
+    echo "   与源码       ${Y}工作区有 ${NEWER_FILES} 个源文件比 jar 新${N}"
   else
-    echo "   与源码       ${Y}有 ${NEWER_FILES} 个源文件比 jar 新 —— 需要重新打包${N}"
+    echo "   与源码       ${G}看起来是最新的${N}${D}（晚于最后一次提交、工作区无更新）${N}"
   fi
 else
   echo "   JAR          ${Y}不存在（还没 mvn package）${N}"
@@ -320,6 +394,13 @@ else
   else
     echo "   对应 commit  ${T_COMMIT}  ${R}与当前 HEAD ${GIT_HEAD} 不一致 —— 这份结果不算数${N}"
   fi
+  if [ -z "${T_DIRTY:-}" ]; then
+    echo "   工作区快照   ${D}旧记录没有这一项（下次跑回归会补上）${N}"
+  elif [ "$T_DIRTY" = "$DIRTY_HASH" ]; then
+    echo "   工作区快照   ${T_DIRTY}  ${G}与现在一致${N}"
+  else
+    echo "   工作区快照   ${T_DIRTY}  ${R}与现在（${DIRTY_HASH}）不一致 —— 这份结果不算数${N}"
+  fi
 fi
 
 echo ""
@@ -329,17 +410,25 @@ if [ "$OFFLINE" -eq 1 ]; then
 elif [ "$REACHABLE" -eq 0 ]; then
   echo "   ${R}${R_ERR}${N}"
 else
-  echo "   JAR          ${R_JAR_TIME:-未知}"
+  echo "   JAR          ${R_JAR_TIME:-未知}   ${D}sha256 ${R_JAR_SHA:-?}…${N}"
   echo "   服务启动     ${R_STARTED:-未知}     状态 ${R_STATE:-未知}"
   if [ "$R_HEALTH" = "UP" ]; then
     echo "   健康检查     ${G}UP${N}"
   else
     echo "   健康检查     ${R}${R_HEALTH}${N}"
   fi
-  if [ -n "$R_JAR_TIME" ] && [ "$R_JAR_TIME" = "$JAR_TIME" ]; then
-    echo "   与本地       ${G}是同一个 jar${N}"
+  if [ -n "$R_JAR_SHA" ] && [ -n "$JAR_SHA" ]; then
+    if [ "$R_JAR_SHA" = "$JAR_SHA" ]; then
+      echo "   与本地       ${G}是同一个 jar（哈希一致）${N}"
+    else
+      echo "   与本地       ${Y}不是同一个 jar（哈希不同，线上仍是旧版）${N}"
+    fi
   elif [ -n "$R_JAR_TIME" ]; then
-    echo "   与本地       ${Y}不是同一个 jar（线上仍是旧版）${N}"
+    echo "   与本地       ${Y}拿不到哈希，只能按时间粗判：${R_JAR_TIME} vs ${JAR_TIME:-无}${N}"
+  fi
+  if [ "${R_JAR_MTIME:-0}" -gt 0 ] && [ "${R_START_EPOCH:-0}" -gt 0 ] \
+     && [ "$R_JAR_MTIME" -gt "$R_START_EPOCH" ]; then
+    echo "   ${Y}注意${N}         jar 比服务启动还晚 —— 换过 jar 但没重启"
   fi
 fi
 

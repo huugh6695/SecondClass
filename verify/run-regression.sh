@@ -233,10 +233,18 @@ fi
 # ─────────────────────────────────────────────────────────────
 RUN_COMMIT="$(git -C "$PROJECT_DIR" rev-parse --short HEAD 2>/dev/null || echo unknown)"
 RUN_DIRTY="$(git -C "$PROJECT_DIR" status --porcelain 2>/dev/null | wc -l | tr -d ' ')"
+# 工作区快照：光记 commit 不够 —— 同一 commit 上改了几个文件再跑，结果也会不一样。
+# 🔴 算法必须和 status.sh 里那段**逐字符一致**（status --porcelain + diff 的 sha256 前 12 位），
+#    否则两边永远对不上，会天天误报「测试之后工作区又改过」。
+RUN_DIRTY_HASH="$(
+  { git -C "$PROJECT_DIR" status --porcelain 2>/dev/null; git -C "$PROJECT_DIR" diff 2>/dev/null; } \
+    | sha256sum | cut -c1-12
+)"
 cat > "$SCRIPT_DIR/.last-run.json" <<JSON
 {
   "commit": "$RUN_COMMIT",
   "dirtyFiles": $RUN_DIRTY,
+  "dirtyHash": "$RUN_DIRTY_HASH",
   "runAt": "$(date '+%Y-%m-%dT%H:%M:%S%z')",
   "scripts": $(( ${#PASSED[@]} + ${#FAILED[@]} )),
   "passed": ${#PASSED[@]},
