@@ -41,3 +41,7 @@ config/application-local.yml
 ### 运行期产物 ###
 logs/
 *.log
+
+### Python 验收脚本的字节码缓存（verify/ 下的脚本会生成）###
+__pycache__/
+*.pyc
