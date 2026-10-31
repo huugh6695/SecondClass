@@ -214,9 +214,38 @@ fi
 
 echo ""
 if [ ${#FAILED[@]} -eq 0 ]; then
-  echo "REGRESSION OK"
-  exit 0
+  RESULT=0
+  RESULT_TEXT="REGRESSION OK"
 else
-  echo "REGRESSION FAILED（${#FAILED[@]} 个脚本失败）"
-  exit 1
+  RESULT=1
+  RESULT_TEXT="REGRESSION FAILED（${#FAILED[@]} 个脚本失败）"
 fi
+
+# ─────────────────────────────────────────────────────────────
+# 写一份结果存档，给 verify/status.sh 读。
+#
+# 🔴 为什么一定要记 commit：
+#    只写"21 个脚本通过"没有任何意义 —— 不知道是什么时候、对着哪一版代码跑的。
+#    提交几次之后，这条记录要么已经过期，要么被误当成"当前代码也通过"。
+#    带上 commit，status.sh 才能自己判断「这份结果还算不算数」。
+#
+# 文件不进版本库（.gitignore 里已忽略），它只代表"最近一次运行"。
+# ─────────────────────────────────────────────────────────────
+RUN_COMMIT="$(git -C "$PROJECT_DIR" rev-parse --short HEAD 2>/dev/null || echo unknown)"
+RUN_DIRTY="$(git -C "$PROJECT_DIR" status --porcelain 2>/dev/null | wc -l | tr -d ' ')"
+cat > "$SCRIPT_DIR/.last-run.json" <<JSON
+{
+  "commit": "$RUN_COMMIT",
+  "dirtyFiles": $RUN_DIRTY,
+  "runAt": "$(date '+%Y-%m-%dT%H:%M:%S%z')",
+  "scripts": $(( ${#PASSED[@]} + ${#FAILED[@]} )),
+  "passed": ${#PASSED[@]},
+  "failed": ${#FAILED[@]},
+  "missing": ${#MISSING[@]},
+  "seconds": $TOTAL,
+  "exit": $RESULT
+}
+JSON
+
+echo "$RESULT_TEXT"
+exit $RESULT
