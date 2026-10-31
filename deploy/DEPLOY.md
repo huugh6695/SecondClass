@@ -213,6 +213,10 @@ curl -s http://127.0.0.1:8120/health
 
 ## 3. 域名与备案（中国大陆服务器的硬门槛）
 
+> 📖 **本章只讲“为什么”。要照着做的完整步骤（在哪点、敲什么命令、怎么验证、出事怎么退回）
+> 在 [`换域名手册.md`](./换域名手册.md)** —— 那里面还写了两个官方口径的坑：
+> 域名实名后**必须等 3 天**才能提交备案、**按量付费实例开不出备案服务号**。
+
 - 服务器在**中国大陆** ⇒ 用 80/443 提供网站服务，**域名必须先完成 ICP 备案**。没备案时云厂商通常会拦掉 80/443。
 - 备案一般要 3–20 个工作日，走的是服务器提供商的备案系统（腾讯云/阿里云各自的入口）。
 - 如果是**校园内网**用、或者服务器在境外，则不需要备案 —— 但境外服务器访问慢，且数据出境要另外评估。
@@ -509,18 +513,27 @@ chown scapp:scapp second-classroom-0.0.1-SNAPSHOT.jar
 mkdir -p /etc/second-classroom
 cp /root/deploy/env.example /etc/second-classroom/env
 
-# 生成一个 JWT_SECRET（复制输出，粘到下面去）
+# 生成 JWT_SECRET、手机号加密密钥和哈希密钥（分别复制输出）
+openssl rand -base64 64
+openssl rand -base64 64
 openssl rand -base64 64
 
 nano /etc/second-classroom/env
 ```
 
-把这三个改成真实值（其余保持默认）：
+把下面这些改成真实值（其余保持默认）。短信网关协议见
+`deploy/README-auth-registration.md`：
 
 ```conf
 DB_PASSWORD=你§6.2设的那个密码
 JWT_SECRET=刚 openssl 生成的那串
 UPLOAD_DIR=/srv/second-classroom/uploads
+SMS_PROVIDER=webhook
+SMS_WEBHOOK_URL=https://你的短信网关/send
+SMS_WEBHOOK_TOKEN=短信网关访问令牌
+SMS_PHONE_ENCRYPTION_KEY=独立生成的第二串随机值
+SMS_PHONE_HASH_SECRET=独立生成的第三串随机值
+SMS_EXPOSE_DEV_CODE=false
 ```
 
 ```bash
@@ -820,6 +833,8 @@ curl -s http://127.0.0.1:8080/health
 
 > ⚠️ **数据库结构有变化时**（改了 `schema.sql`），要在 §③ 之前先对**线上库**执行对应的
 > `ALTER TABLE`。直接 replace jar 不会自动改表。
+> 学生自助注册版本需要先执行：
+> `mysql ... second_classroom < deploy/migrate-auth-registration.sql`
 
 ### 常用命令
 

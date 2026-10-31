@@ -13,7 +13,7 @@
 
 - **在线地址**：<http://<你的服务器IP>:8080>
 - **形态**：单体 Spring Boot 应用（后端接口 + 内置静态前端，打在同一个 jar 里）
-- **规模**：104 个 Java 文件 / 12,105 行；13 张表；51 个接口；前端 4 个文件
+- **规模**：Spring Boot 单体应用；13 张表；58 个接口；前端 4 个文件
 - **状态**：功能已完整实现并上线运行，接口验收 20 个脚本 1,467 条断言全绿
 
 ---
@@ -45,7 +45,8 @@ D:\basic codes\second-classroom\        ← 项目根目录（⚠️ 路径含�
 | 路径 | 说明 |
 |---|---|
 | `requests.http` | **153 KB 的手工测试集**（29 组请求，A/B/C/D 四组）。IDEA 里可逐条点着跑 |
-| `target/` | 编译产物 + **20 个验收脚本 `verify-*.py`** + `run-regression.sh` |
+| `verify/` | **验收脚本**（`lib.py` 公共库 + `verify-*.py` + `run-regression.sh`）。已纳入 git，不会丢 |
+| `target/` | Maven 构建产物。🔴 **别往这里放任何需要长期保存的东西** —— `mvn clean` 会整个删掉 |
 | `logs/` | 本机运行日志 |
 | `uploads/` | 本机上传的附件 |
 | `HELP.md` | Spring Initializr 自动生成的样板文件，**没用，可以删** |
@@ -87,7 +88,7 @@ D:\basic codes\second-classroom\        ← 项目根目录（⚠️ 路径含�
 mysql -uroot -p -e "CREATE DATABASE second_classroom DEFAULT CHARSET utf8mb4"
 mysql -uroot -p --default-character-set=utf8mb4 second_classroom < schema.sql
 
-# 2) 灌一个管理员（初始密码 123456；没有注册接口，账号必须预置）
+# 2) 灌一个管理员（初始密码 123456；管理员仍由后台/导入预置）
 mysql -uroot -p --default-character-set=utf8mb4 second_classroom < deploy/seed.sql
 
 # 3) 启动（IDEA 里直接跑 SecondClassroomApplication 也行）
@@ -98,7 +99,8 @@ mysql -uroot -p --default-character-set=utf8mb4 second_classroom < deploy/seed.s
 
 ### 2.3 想多加几个账号（学生/干事）
 
-系统**没有注册接口，管理员也不能在后台点"新增用户"**。账号靠预置导入：
+学生可以在登录页自助注册：`学号 + 姓名 + 手机验证码 + 自设密码`。注册接口固定创建
+`STUDENT`，不能传角色；管理员和干事账号仍由后台导入/部署预置：
 
 ```bash
 cd deploy
@@ -110,7 +112,9 @@ gen-import-sql.bat 名单.csv 输出.sql      # Windows 双击/命令行
 mysql -uroot -p --default-character-set=utf8mb4 second_classroom < 输出.sql
 ```
 
-**初始密码 = 学号后 6 位**。系统会据此判断"是不是还在用初始密码"，是则强制改密（新密码 6–20 位，须同时含字母和数字）。
+历史预置账号可能仍使用**学号后 6 位**作为初始密码；自助注册账号由学生自行设置密码。
+新设备登录、忘记密码、更换手机号需要短信验证。短信网关和数据库升级见
+`deploy/README-auth-registration.md`。
 
 ---
 
@@ -195,15 +199,25 @@ REPLIED（已回复）
 
 ---
 
-## 5. 接口：51 个
+## 5. 接口：58 个
 
-**契约真源是 `target/doc.txt`（80 KB）**，51 个端点的请求体、响应体、错误码都写在里面。改接口前先读它，改完回去同步它。
+> 🔴 **原来的契约真源 `target/doc.txt`（80 KB）已在 2026-10-28 丢失** —— 和验收脚本一起被
+> `mvn clean` 清掉了，git 里没有备份（`target/` 被忽略）。
+>
+> 现在读接口按这个顺序，可信度从高到低：
+>
+> 1. **`controller/` + `dto/` 的 Javadoc 注释** —— 第一手依据。这个项目的注释写得比文档还细，
+>    很多地方直接标了「文档 §几」和「为什么这么写」
+> 2. **`requests.http`（153 KB、29 组）** —— 请求体的实物样例，能直接点着跑
+> 3. `schema.sql` —— 字段类型和枚举取值
+>
+> 重建契约文档时按这个顺序抄，别凭印象补。
 
 按模块分布：
 
 | 模块 | 大致接口数 | 谁能调 |
 |---|---|---|
-| 认证（登录/查我/改密/登出） | 4 | 所有人 |
+| 认证（登录/注册/短信验证/找回密码/改密/换手机） | 11 | 所有人或登录用户 |
 | 工单（提交/列表/详情/回复/追问/确认/关闭/接单/退回/再次咨询…） | 14 | 学生 + 干事 + 管理员（按动作区分） |
 | 附件、消息、通知 | 6 | 登录用户 |
 | 公告、FAQ、回复模板（读） | 4 | 公告/FAQ 游客可读 |
@@ -251,11 +265,11 @@ http://站点/#/admin/users  → 后台管理
 
 `app.js` 末尾的 `render()` 函数就是路由表，一个 `switch` 加几个前缀判断。**加新页面 = 加一个 `case` + 写一个 `viewXxx()`**。
 
-### 6.2 页面清单（共 15 个视图）
+### 6.2 页面清单（共 17 个视图）
 
 | 学生 / 干事端（9） | 管理端（6） |
 |---|---|
-| 登录、我的工单（干事看到的是「工单处理」）、工单详情、提交工单、再次咨询、消息通知、公告、常见问题、修改密码 | 后台首页、用户管理、敏感词、回复模板、数据统计、数据导出、操作日志 |
+| 登录、学生注册、找回密码、我的工单（干事看到的是「工单处理」）、工单详情、提交工单、再次咨询、消息通知、公告、常见问题、账号安全 | 后台首页、用户管理、敏感词、回复模板、数据统计、数据导出、操作日志 |
 
 ### 6.3 改前端的三条实用提示
 
@@ -342,14 +356,26 @@ sql = sql.replace("WHERE", cond + " AND");   // ❌ 会拼出两个 WHERE
 
 ## 8. 怎么验证改动没把别的弄坏
 
-项目带了 **20 个 `verify-*.py` 验收脚本 + 1 个总调度 `run-regression.sh`**，都在 `target/` 下
-（另有 `verify-deploy-seed.sh` 专门校验初始数据是否灌对）。
+项目带了 **20 个 `verify-*.py` 验收脚本 + 1 个总调度 `run-regression.sh`**，都在 **`verify/`** 目录下。
+
+> 🔴 **为什么从 `target/` 挪走了（2026-10-28 的真实教训）**
+>
+> 这些脚本原来就放在 `target/` 里。`target/` 是 Maven 的构建目录，而 `mvn clean` 的职责
+> 就是**把它整个删掉从头再来**。一次发布时跑了 `mvn clean package`，20 个脚本连同
+> 80 KB 的接口契约 `doc.txt` 一起被清空；又因为 `target/` 在 `.gitignore` 里，**git 里没有备份**，
+> 彻底找不回来了。
+>
+> **铁律：验证脚本放 `verify/` 并纳入 git。`target/` 只放"删了可以重建"的东西。**
 
 ```bash
 # 跑全套（需要先启动一个服务实例，端口随便给，别占用你 IDEA 的 8080）
-bash target/run-regression.sh 8117
+bash verify/run-regression.sh 8117
 # 全部通过时最后一行是：REGRESSION OK
 ```
+
+> 调度器会把 20 个脚本名都列一遍，但**只跑实际存在的文件**。
+> 所以以后往 `verify/` 里加脚本，不用改调度器，下次运行自动生效；
+> 还没重建的会列进「尚未重建」清单，**不算失败**。
 
 | 脚本 | 覆盖什么 |
 |---|---|
@@ -411,8 +437,8 @@ ssh root@<你的服务器IP> 'chown scapp:scapp /srv/second-classroom/*.jar && s
 - [ ] 2. 确认 JDK 17 / MySQL / Redis 都在跑；建库建表灌管理员
 - [ ] 3. 启动，用 `2023003001 / 123456` 登录，**改掉这个密码**
 - [ ] 4. 打开 `requests.http`，从 A0 登录开始，把 A 组跑一遍（能看懂主流程）
-- [ ] 5. 跑一次 `bash target/run-regression.sh 8117`，确认基线是绿的
-- [ ] 6. 读 `target/doc.txt` 里你打算改的那个接口
+- [ ] 5. 跑一次 `bash verify/run-regression.sh 8117`，确认基线是绿的
+- [ ] 6. 读你要改的那个接口的 Controller + DTO 注释（`target/doc.txt` 已丢失，见 §5）
 - [ ] 7. 动手改 → 编译 → 跑回归 → 再提交
 
 ---
@@ -435,10 +461,10 @@ ssh root@<你的服务器IP> 'chown scapp:scapp /srv/second-classroom/*.jar && s
 
 | 文档 | 位置 | 内容 |
 |---|---|---|
-| **接口契约（真源）** | `target/doc.txt` | 51 个端点的完整请求/响应/错误码 |
+| **接口契约（原真源，已丢失）** | ~~`target/doc.txt`~~ | 2026-10-28 被 `mvn clean` 清掉。改按 Controller/DTO 注释 + `requests.http` 为准（见 §5） |
 | **上线运维手册** | `deploy/DEPLOY.md` | 从买服务器到 HTTPS 全流程、故障排查、备份 |
 | 建表语句 | `schema.sql` | 13 张表 |
 | 初始数据 | `deploy/seed.sql` | 只有 1 个管理员 |
 | 账号导入 | `deploy/README-import.md` + `gen-import-sql.bat` | 批量建号 |
 | 手工测试集 | `requests.http` | 29 组可点击执行的请求 |
-| 自动化验收 | `target/verify-*.py` + `run-regression.sh` | 1,467 条断言 |
+| 自动化验收 | `verify/verify-*.py` + `verify/run-regression.sh` | 接口黑盒验收（正在重建，见 §8） |
