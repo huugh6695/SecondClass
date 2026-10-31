@@ -10,6 +10,8 @@ public class UserInfoResult {
     private String role;               // STUDENT / STAFF / ADMIN
     private String openId;             // 当前版本恒为 null（未来微信扩展）
     private String subscribeStatus;    // 当前版本恒为 UNSUBSCRIBED
+    private boolean phoneBound;
+    private String maskedPhone;
 
     public String getUserId() { return userId; }
     public void setUserId(String userId) { this.userId = userId; }
@@ -25,4 +27,10 @@ public class UserInfoResult {
 
     public String getSubscribeStatus() { return subscribeStatus; }
     public void setSubscribeStatus(String subscribeStatus) { this.subscribeStatus = subscribeStatus; }
+
+    public boolean isPhoneBound() { return phoneBound; }
+    public void setPhoneBound(boolean phoneBound) { this.phoneBound = phoneBound; }
+
+    public String getMaskedPhone() { return maskedPhone; }
+    public void setMaskedPhone(String maskedPhone) { this.maskedPhone = maskedPhone; }
 }

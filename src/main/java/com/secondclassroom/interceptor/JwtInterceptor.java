@@ -124,14 +124,18 @@ public class JwtInterceptor implements HandlerInterceptor {
         String userId = jwtUtil.getUserId(token);
         String userType = jwtUtil.getUserType(token);
 
-        String dbStatus = queryUserStatus(userId);
-        if (dbStatus == null) {
+        UserSecurityState securityState = queryUserSecurityState(userId);
+        if (securityState == null) {
             // Token 签名有效、但库里已经没有这个人了（比如测试数据被清理过）→ 当作未认证
             writeJson(response, 401, "账号不存在，请重新登录");
             return false;
         }
-        if ("DISABLED".equals(dbStatus)) {
+        if ("DISABLED".equals(securityState.status())) {
             writeJson(response, 403, "账号已禁用");
+            return false;
+        }
+        if (securityState.tokenVersion() != jwtUtil.getTokenVersion(token)) {
+            writeJson(response, 401, "账号认证状态已更新，请重新登录");
             return false;
         }
 
@@ -144,14 +148,19 @@ public class JwtInterceptor implements HandlerInterceptor {
     }
 
     /** 查用户当前状态；用户不存在返回 null（交给调用方决定报 401 还是别的） */
-    private String queryUserStatus(String userId) {
+    private UserSecurityState queryUserSecurityState(String userId) {
         try {
             return jdbcTemplate.queryForObject(
-                    "SELECT status FROM t_user WHERE user_id = ?", String.class, userId);
+                    "SELECT status, token_version FROM t_user WHERE user_id = ?",
+                    (rs, rowNum) -> new UserSecurityState(
+                            rs.getString("status"), rs.getInt("token_version")),
+                    userId);
         } catch (EmptyResultDataAccessException e) {
             return null;
         }
     }
+
+    private record UserSecurityState(String status, int tokenVersion) {}
 
     /**
      * 这个请求的路径是否属于「可选 Token」。

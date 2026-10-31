@@ -3,6 +3,8 @@ package com.secondclassroom.service;
 import com.secondclassroom.common.Result;
 import com.secondclassroom.common.TokenBlacklist;
 import com.secondclassroom.dto.LoginResult;
+import com.secondclassroom.dto.LoginSmsVerifyRequest;
+import com.secondclassroom.dto.SmsCodeResult;
 import com.secondclassroom.dto.UserInfoResult;
 import com.secondclassroom.model.User;
 import com.secondclassroom.util.JwtUtil;
@@ -10,6 +12,7 @@ import org.mindrot.jbcrypt.BCrypt;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.dao.EmptyResultDataAccessException;
+import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.RowMapper;
 import org.springframework.stereotype.Service;
@@ -17,6 +20,8 @@ import org.springframework.stereotype.Service;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.time.LocalDateTime;
+import java.time.Duration;
+import java.util.UUID;
 
 /**
  * 登录业务逻辑：查用户 → 校验密码 → 发 Token。
@@ -26,24 +31,40 @@ import java.time.LocalDateTime;
 public class AuthService {
 
     private static final Logger log = LoggerFactory.getLogger(AuthService.class);
+    private static final int MAX_LOGIN_FAILURES = 10;
+    private static final Duration LOGIN_FAILURE_WINDOW = Duration.ofMinutes(15);
 
     private final JdbcTemplate jdbcTemplate;
     private final JwtUtil jwtUtil;
     private final TokenBlacklist blacklist;
     private final OperationLogService operationLogService;
+    private final SmsCodeService smsCodeService;
+    private final PhoneCryptoService phoneCryptoService;
+    private final DeviceTrustService deviceTrustService;
+    private final StringRedisTemplate redis;
 
     public AuthService(JdbcTemplate jdbcTemplate, JwtUtil jwtUtil, TokenBlacklist blacklist,
-                       OperationLogService operationLogService) {
+                       OperationLogService operationLogService, SmsCodeService smsCodeService,
+                       PhoneCryptoService phoneCryptoService,
+                       DeviceTrustService deviceTrustService,
+                       StringRedisTemplate redis) {
         this.jdbcTemplate = jdbcTemplate;
         this.jwtUtil = jwtUtil;
         this.blacklist = blacklist;
         this.operationLogService = operationLogService;
+        this.smsCodeService = smsCodeService;
+        this.phoneCryptoService = phoneCryptoService;
+        this.deviceTrustService = deviceTrustService;
+        this.redis = redis;
     }
 
-    public Result<LoginResult> login(String userId, String password) {
+    public Result<LoginResult> login(String userId, String password, String deviceToken) {
         // 1. 入参非空校验
         if (userId == null || userId.isBlank() || password == null || password.isBlank()) {
             return Result.fail(401, "账号或密码错误");
+        }
+        if (loginFailureBlocked(userId)) {
+            return Result.fail(429, "登录失败次数过多，请 15 分钟后再试");
         }
 
         // 2. 按学号查用户（查不到 queryForObject 会抛异常，拦下来当"账号密码错误"）
@@ -53,6 +74,7 @@ public class AuthService {
                     "SELECT * FROM t_user WHERE user_id = ?",
                     new UserRowMapper(), userId);
         } catch (EmptyResultDataAccessException e) {
+            recordLoginFailure(userId);
             return Result.fail(401, "账号或密码错误");
         }
 
@@ -63,37 +85,149 @@ public class AuthService {
 
         // 4. bcrypt 比对密码（注意：用 checkpw，不要用 equals 直接比明文）
         if (!BCrypt.checkpw(password, user.getPassword())) {
+            recordLoginFailure(userId);
             return Result.fail(401, "账号或密码错误");
         }
 
-        // 5. 更新最后登录时间
+        // 5. 绑定过手机的新账号在未知设备上必须做一次短信验证。
+        //    历史预置账号没有手机号，继续兼容“学号 + 密码”登录。
+        if (hasVerifiedPhone(user)) {
+            try {
+                if (!deviceTrustService.isTrusted(userId, deviceToken)) {
+                    return createLoginChallenge(user);
+                }
+            } catch (RuntimeException e) {
+                log.error("可信设备检查失败", e);
+                return Result.fail(503, "登录安全服务暂时不可用，请稍后重试");
+            }
+        }
+
+        return completeLogin(user, password, null);
+    }
+
+    public Result<LoginResult> verifyLoginSms(LoginSmsVerifyRequest req) {
+        if (req == null || req.getChallengeId() == null || req.getChallengeId().isBlank()) {
+            return Result.fail(400, "登录验证已失效，请重新输入密码");
+        }
+        String challengeKey = "auth:login:challenge:" + req.getChallengeId();
+        String userId = redis.opsForValue().get(challengeKey);
+        if (userId == null) {
+            return Result.fail(400, "登录验证已失效，请重新输入密码");
+        }
+
+        Result<Void> codeResult = smsCodeService.verifyCode(
+                "LOGIN", "LOGIN|" + userId, req.getSmsCode());
+        if (!codeResult.isSuccess()) {
+            return Result.fail(codeResult.getCode(), codeResult.getMessage());
+        }
+
+        User user = findUserOrNull(userId);
+        if (user == null) {
+            redis.delete(challengeKey);
+            return Result.fail(401, "账号不存在，请重新登录");
+        }
+        if ("DISABLED".equals(user.getStatus())) {
+            redis.delete(challengeKey);
+            return Result.fail(403, "账号已禁用");
+        }
+        redis.delete(challengeKey);
+        String deviceToken = deviceTrustService.issueToken(userId);
+        return completeLogin(user, null, deviceToken);
+    }
+
+    private Result<LoginResult> createLoginChallenge(User user) {
+        String challengeId = UUID.randomUUID().toString();
+        String challengeKey = "auth:login:challenge:" + challengeId;
+        redis.opsForValue().set(challengeKey, user.getUserId(), Duration.ofMinutes(5));
+
+        String phone = phoneCryptoService.decrypt(user.getPhoneCiphertext());
+        Result<?> sendResult = smsCodeService.sendCode(
+                "LOGIN", "LOGIN|" + user.getUserId(), phone);
+        if (!sendResult.isSuccess()) {
+            redis.delete(challengeKey);
+            return Result.fail(sendResult.getCode(), sendResult.getMessage());
+        }
+
+        LoginResult result = new LoginResult();
+        result.setRequiresSms(true);
+        result.setChallengeId(challengeId);
+        result.setMaskedPhone(phoneCryptoService.maskPhone(phone));
+        if (sendResult.getData() instanceof SmsCodeResult smsData) {
+            result.setDebugCode(smsData.getDebugCode());
+        }
+        return Result.success("这是一台新设备，请完成短信验证", result);
+    }
+
+    private Result<LoginResult> completeLogin(User user, String plainPassword,
+                                              String newDeviceToken) {
+        clearLoginFailures(user.getUserId());
         jdbcTemplate.update(
                 "UPDATE t_user SET last_login_time = NOW() WHERE user_id = ?",
-                userId);
+                user.getUserId());
 
-        // 5.1 记审计日志。
-        //     注意位置：一定要放在"密码校验通过之后"。登录失败（账号不存在/密码错/已禁用）
-        //     都在上面 return 掉了，走不到这里 —— 那些失败的尝试不记 LOGIN，
-        //     否则管理员查日志会看到一堆"登录成功"，完全没法用来排查异常登录。
         operationLogService.record(user.getUserId(), user.getUserName(), user.getUserType(),
-                "LOGIN", "USER", user.getUserId(), "用户登录");
+                "LOGIN", "USER", user.getUserId(),
+                newDeviceToken == null ? "用户登录" : "新设备短信验证登录");
 
-        // 6. 是否仍是默认密码（学号后 6 位）→ 强制改密
-        String defaultPwd = userId.length() >= 6
-                ? userId.substring(userId.length() - 6)
-                : userId;
-        boolean needChange = defaultPwd.equals(password);
+        String defaultPwd = user.getUserId().length() >= 6
+                ? user.getUserId().substring(user.getUserId().length() - 6)
+                : user.getUserId();
+        boolean needChange = plainPassword != null && defaultPwd.equals(plainPassword);
 
-        // 7. 生成 Token，组装返回数据
-        String token = jwtUtil.generateToken(user.getUserId(), user.getUserType());
         LoginResult result = new LoginResult();
-        result.setToken(token);
+        result.setToken(jwtUtil.generateToken(
+                user.getUserId(), user.getUserType(), user.getTokenVersion()));
         result.setUserId(user.getUserId());
         result.setUserName(user.getUserName());
         result.setRole(user.getUserType());
         result.setNeedChangePassword(needChange);
-
+        result.setDeviceToken(newDeviceToken);
+        if (hasVerifiedPhone(user)) {
+            result.setMaskedPhone(phoneCryptoService.maskPhone(
+                    phoneCryptoService.decrypt(user.getPhoneCiphertext())));
+        }
         return Result.success("登录成功", result);
+    }
+
+    private boolean hasVerifiedPhone(User user) {
+        return user.getPhoneHash() != null
+                && user.getPhoneCiphertext() != null
+                && user.getPhoneVerifiedAt() != null;
+    }
+
+    private boolean loginFailureBlocked(String userId) {
+        try {
+            String value = redis.opsForValue().get(loginFailureKey(userId));
+            return value != null && Integer.parseInt(value) >= MAX_LOGIN_FAILURES;
+        } catch (RuntimeException e) {
+            // Redis 故障不能让所有历史账号都无法登录；这里降级为不锁，短信验证另有独立保护。
+            log.warn("登录失败次数检查不可用: {}", e.getMessage());
+            return false;
+        }
+    }
+
+    private void recordLoginFailure(String userId) {
+        try {
+            String key = loginFailureKey(userId);
+            Long count = redis.opsForValue().increment(key);
+            if (count != null && count == 1L) {
+                redis.expire(key, LOGIN_FAILURE_WINDOW);
+            }
+        } catch (RuntimeException e) {
+            log.warn("登录失败次数记录不可用: {}", e.getMessage());
+        }
+    }
+
+    private void clearLoginFailures(String userId) {
+        try {
+            redis.delete(loginFailureKey(userId));
+        } catch (RuntimeException e) {
+            log.warn("登录失败次数清理不可用: {}", e.getMessage());
+        }
+    }
+
+    private String loginFailureKey(String userId) {
+        return "auth:login:fail:" + phoneCryptoService.hmacHex(userId);
     }
 
     /** 查询当前登录用户的基本信息（/api/auth/me 用） */
@@ -111,6 +245,12 @@ public class AuthService {
         info.setRole(user.getUserType());
         info.setOpenId(user.getOpenId());
         info.setSubscribeStatus(user.getSubscribeStatus());
+        boolean phoneBound = hasVerifiedPhone(user);
+        info.setPhoneBound(phoneBound);
+        if (phoneBound) {
+            info.setMaskedPhone(phoneCryptoService.maskPhone(
+                    phoneCryptoService.decrypt(user.getPhoneCiphertext())));
+        }
         return Result.success("success", info);
     }
 
@@ -206,7 +346,12 @@ public class AuthService {
             u.setPassword(rs.getString("password"));
             u.setOpenId(rs.getString("open_id"));
             u.setSubscribeStatus(rs.getString("subscribe_status"));
+            u.setPhoneCiphertext(rs.getString("phone_ciphertext"));
+            u.setPhoneHash(rs.getString("phone_hash"));
+            u.setPhoneLast4(rs.getString("phone_last4"));
+            u.setPhoneVerifiedAt(rs.getObject("phone_verified_at", LocalDateTime.class));
             u.setStatus(rs.getString("status"));
+            u.setTokenVersion(rs.getInt("token_version"));
             u.setCreateTime(rs.getObject("create_time", LocalDateTime.class));
             u.setUpdateTime(rs.getObject("update_time", LocalDateTime.class));
             u.setLastLoginTime(rs.getObject("last_login_time", LocalDateTime.class));

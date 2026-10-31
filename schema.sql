@@ -23,11 +23,17 @@ CREATE TABLE t_user (
   password         VARCHAR(255) NOT NULL COMMENT 'bcrypt 加密密码',
   open_id          VARCHAR(128) DEFAULT NULL COMMENT '微信公众号 OpenID（未来扩展）',
   subscribe_status ENUM('SUBSCRIBED','UNSUBSCRIBED') NOT NULL DEFAULT 'UNSUBSCRIBED',
+  phone_ciphertext VARCHAR(512) DEFAULT NULL COMMENT '手机号 AES-GCM 密文',
+  phone_hash       CHAR(64)     DEFAULT NULL COMMENT '手机号 HMAC，用于查重',
+  phone_last4      CHAR(4)      DEFAULT NULL COMMENT '手机号后四位，用于脱敏展示',
+  phone_verified_at DATETIME    DEFAULT NULL COMMENT '手机号验证时间',
   status           ENUM('ACTIVE','DISABLED') NOT NULL DEFAULT 'ACTIVE',
+  token_version    INT          NOT NULL DEFAULT 0 COMMENT '密码重置后递增，用于撤销旧 JWT',
   create_time      DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
   update_time      DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   last_login_time  DATETIME     DEFAULT NULL,
   PRIMARY KEY (user_id),
+  UNIQUE KEY uk_user_phone_hash (phone_hash),
   KEY idx_user_type (user_type),
   KEY idx_status (status)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

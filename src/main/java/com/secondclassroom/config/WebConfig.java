@@ -23,6 +23,11 @@ public class WebConfig implements WebMvcConfigurer {
                 .addPathPatterns("/**")                  // 拦截所有请求
                 .excludePathPatterns(
                         "/api/auth/login",               // 登录接口本来就不需要 Token
+                        "/api/auth/login/sms/verify",    // 新设备短信验证
+                        "/api/auth/register",            // 学生自助注册
+                        "/api/auth/register/sms-code",   // 注册手机验证码
+                        "/api/auth/password/reset",      // 忘记密码
+                        "/api/auth/password/reset/sms-code",
                         "/health",                       // 健康检查要放行：监控/负载均衡探活不会带 Token
 
                         // ---------- 前端静态资源（⑩ 前端阶段新增）----------

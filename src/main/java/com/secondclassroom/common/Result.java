@@ -1,5 +1,7 @@
 package com.secondclassroom.common;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
+
 /**
  * 统一接口返回结构：所有 Controller 都返回这个类。
  * code=0 表示成功；非 0 表示失败（如 401 未认证、403 无权限）。
@@ -34,6 +36,9 @@ public class Result<T> {
 
     public int getCode() { return code; }
     public void setCode(int code) { this.code = code; }
+
+    @JsonIgnore
+    public boolean isSuccess() { return code == 0; }
     public String getMessage() { return message; }
     public void setMessage(String message) { this.message = message; }
     public T getData() { return data; }

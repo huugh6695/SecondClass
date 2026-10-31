@@ -48,6 +48,22 @@ jwt:
 # 异步通知派发：定时扫 t_notification_log 里 status='PENDING' 的记录去推送
 # （业务代码只写 PENDING，真发送由 NotificationDispatchService 异步做）
 app:
+  sms:
+    # 本地默认把验证码写入日志，并在开发响应中返回 debugCode。
+    # 生产把 SMS_PROVIDER 设为 webhook，并配置 SMS_WEBHOOK_URL / SMS_WEBHOOK_TOKEN。
+    provider: ${SMS_PROVIDER:log}
+    expose-dev-code: ${SMS_EXPOSE_DEV_CODE:true}
+    webhook-url: ${SMS_WEBHOOK_URL:}
+    webhook-token: ${SMS_WEBHOOK_TOKEN:}
+    encryption-key: ${SMS_PHONE_ENCRYPTION_KEY:${jwt.secret}}
+    hash-secret: ${SMS_PHONE_HASH_SECRET:${jwt.secret}}
+    code-ttl-seconds: 300
+    resend-cooldown-seconds: 60
+    max-attempts: 5
+    daily-limit: 10
+    ip-hourly-limit: 30
+    device-trust-days: 180
+
   notification:
     enabled: true                    # 总开关，本地调试想停掉定时任务就改 false
     scan-interval-ms: 10000          # 每轮间隔：上一轮跑完再等这么久（不是固定频率）

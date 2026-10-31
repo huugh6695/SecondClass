@@ -71,12 +71,13 @@ public class JwtUtil {
      *    加了 jti 之后每个 Token 都不一样 ⇒ 登出只作废"这一个"，
      *    新登录拿到的那份不受牵连（黑名单 key 是 Token 的哈希，哈希不同就互不干扰）。
      */
-    public String generateToken(String userId, String userType) {
+    public String generateToken(String userId, String userType, int tokenVersion) {
         Date now = new Date();
         Date exp = new Date(now.getTime() + expirationSeconds * 1000L);
         return Jwts.builder()
                 .subject(userId)
                 .claim("userType", userType)
+                .claim("tokenVersion", tokenVersion)
                 .id(UUID.randomUUID().toString())   // jti：每次登录一个新 UUID ⇒ Token 唯一
                 .issuedAt(now)
                 .expiration(exp)
@@ -104,6 +105,12 @@ public class JwtUtil {
     /** 从 Token 中取出角色 userType */
     public String getUserType(String token) {
         return parseToken(token).get("userType", String.class);
+    }
+
+    /** Token 版本：密码重置后数据库递增，旧 Token 随即失效。 */
+    public int getTokenVersion(String token) {
+        Integer version = parseToken(token).get("tokenVersion", Integer.class);
+        return version == null ? 0 : version;
     }
 
     /**
