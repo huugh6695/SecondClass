@@ -52,3 +52,8 @@ INTERVIEW.md
 
 ### status.sh 的测试结果存档（每次运行重写，不进版本库）###
 verify/.last-run.json
+
+### 会话交接单（内容是"我此刻停在哪"，每次覆盖，只在本机有效）###
+### 模板本身在 verify/SESSION-TEMPLATE.md，那个要进库 ###
+SESSION.md
+verify/.session-prev.md

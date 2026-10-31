@@ -9,6 +9,9 @@
 #     ④ 线上      服务器上跑的是哪个 jar、服务什么时候启动的
 #     ⑤ 数据库    本地和线上的 schema 版本各是什么
 #
+# 另加 ⑥ 交接单：前五项比的是「版本一致不一致」，⑥ 查的是
+# 「人写的判断过期了没有」——两种问题，不该混在一起数。
+#
 # 用法：
 #     bash verify/status.sh              # 人类可读（默认，会连服务器，约 5~10 秒）
 #     bash verify/status.sh --offline    # 只查本地，不连服务器（约 1 秒）
@@ -36,7 +39,7 @@ for arg in "$@"; do
   case "$arg" in
     --json)    MODE="json" ;;
     --offline) OFFLINE=1 ;;
-    -h|--help) sed -n '2,23p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help) sed -n '2,26p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) echo "未知参数：$arg（用 --help 看用法）"; exit 2 ;;
   esac
 done
@@ -199,6 +202,23 @@ if [ "$OFFLINE" -eq 0 ] && [ "$REACHABLE" -eq 1 ]; then
 fi
 
 # ─────────────────────────────────────────────────────────────
+# ⑥ 交接单（SESSION.md 是不是过期了）
+# ─────────────────────────────────────────────────────────────
+# 为什么不直接在 status.sh 里读 SESSION.md：
+#   过期规则是交接单自己的事，写在生成它的脚本旁边才改得动。
+#   这里只负责把它的结论翻译成一行字。
+H_STATE=""; H_DETAIL=""; H_AHEAD=""; H_DAYS=""; H_COMMIT=""
+if [ -f "$SCRIPT_DIR/session.sh" ]; then
+  H_RAW="$(bash "$SCRIPT_DIR/session.sh" check --raw 2>/dev/null || true)"
+  hget() { printf '%s\n' "$H_RAW" | sed -n "s/^$1=//p" | head -1; }
+  H_STATE="$(hget STATE)"
+  H_DETAIL="$(hget DETAIL)"
+  H_COMMIT="$(hget COMMIT)"
+  H_AHEAD="$(hget AHEAD)"
+  H_DAYS="$(hget DAYS)"
+fi
+
+# ─────────────────────────────────────────────────────────────
 # 汇总判断：把"不一致"的地方挑出来
 # ─────────────────────────────────────────────────────────────
 WARN=()
@@ -223,6 +243,12 @@ if [ "$OFFLINE" -eq 0 ]; then
   [ -z "${DB_REMOTE:-}" ] && [ "$REACHABLE" -eq 1 ] && WARN+=("线上没有 schema 版本记录（未执行 migrate-schema-version.sql）")
 fi
 
+# 交接单"没有"不算问题（新克隆的仓库本来就没有，它也不进版本库）；
+# 只有"有但过期"才值得提醒 —— 否则这条会变成每次开机都响的假警报。
+if [ "$H_STATE" = "stale" ] || [ "$H_STATE" = "unknown" ]; then
+  WARN+=("交接单已过期：${H_DETAIL}")
+fi
+
 # ─────────────────────────────────────────────────────────────
 # 渲染
 # ─────────────────────────────────────────────────────────────
@@ -237,6 +263,9 @@ if [ "$MODE" = "json" ]; then
     "$REACHABLE" "${R_JAR_TIME:-}" "${R_STARTED:-}" "${R_STATE:-}" "${R_HEALTH:-}"
   printf '  "database": {"localVersion": "%s", "localAuthColumns": "%s", "remoteVersion": "%s", "remoteAuthColumns": "%s"},\n' \
     "${DB_LOCAL:-}" "${AUTH_COLS_LOCAL:-}" "${DB_REMOTE:-}" "${AUTH_COLS_REMOTE:-}"
+  printf '  "handover": {"state": "%s", "commit": "%s", "ahead": %s, "days": %s, "detail": "%s"},\n' \
+    "${H_STATE:-missing}" "${H_COMMIT:-}" "${H_AHEAD:-0}" "${H_DAYS:-0}" \
+    "$(printf '%s' "${H_DETAIL:-}" | sed 's/"/\\"/g')"
   if [ ${#WARN[@]} -eq 0 ]; then
     printf '  "warnings": []\n'
   else
@@ -327,6 +356,20 @@ if [ "$OFFLINE" -eq 0 ] && [ "$REACHABLE" -eq 1 ]; then
   else
     echo "   线上版本     ${Y}无记录/未迁移   认证字段 ${AUTH_COLS_REMOTE:-0}/5${N}"
   fi
+fi
+
+echo ""
+echo "⑥ 交接单"
+if [ -z "$H_STATE" ]; then
+  echo "   ${D}未检查（找不到 verify/session.sh）${N}"
+elif [ "$H_STATE" = "missing" ]; then
+  echo "   ${D}没有（新克隆的仓库本来就没有，不算问题）${N}"
+elif [ "$H_STATE" = "ok" ]; then
+  echo "   SESSION.md   ${G}与当前 HEAD 一致${N}"
+elif [ "$H_STATE" = "behind" ]; then
+  echo "   SESSION.md   写于 ${H_COMMIT}，之后有 ${H_AHEAD} 个提交（仍可参考）"
+else
+  echo "   SESSION.md   ${Y}${H_DETAIL}${N}"
 fi
 
 echo ""
