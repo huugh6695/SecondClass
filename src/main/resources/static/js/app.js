@@ -11,12 +11,16 @@
    → 在导航里加个链接。
    ============================================================= */
 
-import { api, getToken, setToken, clearToken, requestBlob, saveBlob } from './api.js?v=20261027';
+import {
+  api, getToken, setToken, clearToken, getDeviceToken, setDeviceToken,
+  requestBlob, saveBlob
+} from './api.js?v=20261031';
 
 /* ---------- 全局状态：整个前端就这一个"记事本" ---------- */
 
 const state = {
   me: null,                   // 当前登录人；null = 没登录（这就是"登录态"）
+  loginChallenge: null,       // 已通过密码、等待新设备短信验证的登录挑战
   needChangePassword: false,  // 是否还在用初始密码（学号后 6 位）
   notice: null,               // 页面上要显示的一条提示：{ type, text }
 
@@ -357,6 +361,7 @@ function onNeedLogin(msg) {
     return;
   }
   state.me = null;
+  state.loginChallenge = null;
   render();
 }
 
@@ -433,6 +438,7 @@ function topbarHtml() {
             <div class="more-menu" id="more-menu" hidden>
               ${me.role === 'ADMIN'
                 ? '<button class="more-item" id="mi-admin" type="button">管理后台</button>' : ''}
+              <button class="more-item" id="mi-security" type="button">账号安全</button>
               <button class="more-item" id="mi-ann" type="button">公告</button>
               <button class="more-item" id="mi-faq" type="button">常见问题</button>
             </div>
@@ -485,6 +491,8 @@ function bindTopbar() {
   // 所以这里拿不到元素是正常的，必须判空再绑。
   const miAdmin = document.getElementById('mi-admin');
   if (miAdmin) miAdmin.addEventListener('click', () => go('/admin'));
+  const miSecurity = document.getElementById('mi-security');
+  if (miSecurity) miSecurity.addEventListener('click', () => go('/password'));
   const miAnn = document.getElementById('mi-ann');
   if (miAnn) miAnn.addEventListener('click', () => go('/announcements'));
   const miFaq = document.getElementById('mi-faq');
@@ -603,6 +611,7 @@ async function onLogout() {
   clearToken();
   localStorage.removeItem(NOW_CHANGE_KEY);
   state.me = null;
+  state.loginChallenge = null;
   state.needChangePassword = false;
   state.unreadCount = 0;
   // 换个账号登进来，不该还停在上一个人翻到的第 3 页、带着他的搜索词、他的未读红点
@@ -615,6 +624,7 @@ async function onLogout() {
 /* ---------- 三、页面：登录 ---------- */
 
 function viewLogin() {
+  const challenge = state.loginChallenge;
   appEl.innerHTML = `
     <div class="center-wrap">
       <div class="login-shell">
@@ -645,43 +655,81 @@ function viewLogin() {
         <section class="login-panel">
           <div class="card login-card">
             <div class="login-mobile-brand">${brandLockupHtml()}</div>
-            <div class="login-heading">
-              <p class="eyebrow">学时答疑</p>
-              <h2>欢迎回来</h2>
-              <p class="sub">请用学号登录，查看你的工单与消息</p>
-            </div>
-            <div id="notice-slot">${alertHtml()}</div>
-            <form id="login-form">
-              <div class="field">
-                <label for="userId">学号</label>
-                <input class="input" id="userId" type="text" inputmode="numeric"
-                       autocomplete="username" placeholder="请输入学号" required>
+            ${challenge ? `
+              <div class="login-heading">
+                <p class="eyebrow">新设备验证</p>
+                <h2>确认是你本人</h2>
+                <p class="sub">密码校验已通过，请输入发送至 ${esc(challenge.maskedPhone || '绑定手机号')} 的验证码</p>
+                ${challenge.debugCode ? `<p class="muted login-hint">本地验证码：${esc(challenge.debugCode)}</p>` : ''}
               </div>
-              <div class="field">
-                <label for="password">密码</label>
-                <input class="input" id="password" type="password"
-                       autocomplete="current-password" placeholder="请输入密码" required>
+              <div id="notice-slot">${alertHtml()}</div>
+              <form id="login-sms-form">
+                <div class="field">
+                  <label for="loginSmsCode">短信验证码</label>
+                  <input class="input sms-code-input" id="loginSmsCode" type="text"
+                         inputmode="numeric" maxlength="6" autocomplete="one-time-code"
+                         placeholder="6 位验证码" required>
+                </div>
+                <button class="btn btn-primary btn-block login-submit" id="login-sms-btn" type="submit">
+                  验证并登录 <span aria-hidden="true">→</span>
+                </button>
+                <button class="btn btn-ghost btn-block" id="login-sms-back" type="button">返回密码登录</button>
+              </form>
+            ` : `
+              <div class="login-heading">
+                <p class="eyebrow">学时答疑</p>
+                <h2>欢迎回来</h2>
+                <p class="sub">请用学号登录，查看你的工单与消息</p>
               </div>
-              <button class="btn btn-primary btn-block login-submit" id="login-btn" type="submit">
-                登录服务台 <span aria-hidden="true">→</span>
-              </button>
-            </form>
-            <div class="login-assist">
-              <p class="muted login-hint">
-                初次登录密码为<strong>学号后 6 位</strong>，登录后请及时修改。
-              </p>
-              <p class="muted login-hint">
-                无需登录：
-                <button class="lnk" id="login-see-faq" type="button">常见问题</button>
-                <span aria-hidden="true">·</span>
-                <button class="lnk" id="login-see-ann" type="button">查看公告</button>
-              </p>
-            </div>
+              <div id="notice-slot">${alertHtml()}</div>
+              <form id="login-form">
+                <div class="field">
+                  <label for="userId">学号</label>
+                  <input class="input" id="userId" type="text" inputmode="numeric"
+                         autocomplete="username" placeholder="请输入学号" required>
+                </div>
+                <div class="field">
+                  <label for="password">密码</label>
+                  <input class="input" id="password" type="password"
+                         autocomplete="current-password" placeholder="请输入密码" required>
+                </div>
+                <button class="btn btn-primary btn-block login-submit" id="login-btn" type="submit">
+                  登录服务台 <span aria-hidden="true">→</span>
+                </button>
+              </form>
+              <div class="login-quick-links">
+                <button class="lnk" id="login-register" type="button">注册学生账号</button>
+                <button class="lnk" id="login-forgot" type="button">忘记密码</button>
+              </div>
+              <div class="login-assist">
+                <p class="muted login-hint">
+                  预置账号初次登录密码为<strong>学号后 6 位</strong>；自助注册账号使用自己设置的密码。
+                </p>
+                <p class="muted login-hint">
+                  无需登录：
+                  <button class="lnk" id="login-see-faq" type="button">常见问题</button>
+                  <span aria-hidden="true">·</span>
+                  <button class="lnk" id="login-see-ann" type="button">查看公告</button>
+                </p>
+              </div>
+            `}
           </div>
         </section>
       </div>
     </div>`;
+  if (challenge) {
+    document.getElementById('login-sms-form').addEventListener('submit', onVerifyLoginSms);
+    document.getElementById('login-sms-back').addEventListener('click', () => {
+      state.loginChallenge = null;
+      render();
+    });
+    document.getElementById('loginSmsCode').focus();
+    return;
+  }
+
   document.getElementById('login-form').addEventListener('submit', onLogin);
+  document.getElementById('login-register').addEventListener('click', () => go('/register'));
+  document.getElementById('login-forgot').addEventListener('click', () => go('/forgot-password'));
 
   // 这两个是游客**唯一**能进的页面入口 —— 不放这里的话，
   // 公告和 FAQ 对游客来说等于"存在但找不到"（游客态顶部条只有进了这两个页面才出现）。
@@ -702,7 +750,7 @@ async function onLogin(e) {
   btn.textContent = '登录中…';
   setNotice(null, null);
 
-  const r = await api.login(userId, password);
+  const r = await api.login(userId, password, getDeviceToken());
   if (!r.ok) {
     btn.disabled = false;
     btn.textContent = '登录';
@@ -710,8 +758,44 @@ async function onLogin(e) {
     return;
   }
 
-  setToken(r.data.token);
-  state.needChangePassword = !!r.data.needChangePassword;
+  if (r.data.requiresSms) {
+    state.loginChallenge = r.data;
+    setNotice(null, null);
+    render();
+    return;
+  }
+  await finishLogin(r.data);
+}
+
+async function onVerifyLoginSms(e) {
+  e.preventDefault();
+  const challenge = state.loginChallenge;
+  if (!challenge) return;
+  const btn = document.getElementById('login-sms-btn');
+  const smsCode = document.getElementById('loginSmsCode').value.trim();
+  if (!/^\d{6}$/.test(smsCode)) {
+    setNotice('error', '请输入 6 位短信验证码');
+    return;
+  }
+
+  btn.disabled = true;
+  btn.textContent = '验证中…';
+  setNotice(null, null);
+  const r = await api.verifyLoginSms(challenge.challengeId, smsCode);
+  if (!r.ok) {
+    btn.disabled = false;
+    btn.textContent = '验证并登录';
+    setNotice('error', r.message);
+    return;
+  }
+  state.loginChallenge = null;
+  await finishLogin(r.data);
+}
+
+async function finishLogin(data) {
+  if (data.deviceToken) setDeviceToken(data.deviceToken);
+  setToken(data.token);
+  state.needChangePassword = !!data.needChangePassword;
   if (state.needChangePassword) localStorage.setItem(NOW_CHANGE_KEY, '1');
 
   // 登录接口其实已经带了姓名和角色，但 /api/auth/me 才是"当前用户"的单一事实来源，
@@ -719,11 +803,261 @@ async function onLogin(e) {
   const m = await api.me();
   state.me = m.ok
     ? m.data
-    : { userId: r.data.userId, userName: r.data.userName, role: r.data.role };
+    : { userId: data.userId, userName: data.userName, role: data.role };
 
   setNotice(null, null);
   // 登进来就开始盯着未读通知（顶部红点）；顺带会立刻问一次，所以红点是马上出来的
   startUnreadPolling();
+  go('/');
+}
+
+function startSmsCountdown(btn) {
+  if (!btn) return;
+  let remaining = 60;
+  btn.disabled = true;
+  btn.textContent = remaining + ' 秒后重试';
+  const timer = window.setInterval(() => {
+    remaining -= 1;
+    if (remaining <= 0) {
+      window.clearInterval(timer);
+      if (document.body.contains(btn)) {
+        btn.disabled = false;
+        btn.textContent = '重新获取';
+      }
+      return;
+    }
+    if (document.body.contains(btn)) btn.textContent = remaining + ' 秒后重试';
+  }, 1000);
+}
+
+function showSmsResult(r, successText) {
+  if (!r.ok) {
+    setNotice('error', r.message);
+    return false;
+  }
+  const debug = r.data && r.data.debugCode ? `（本地验证码：${r.data.debugCode}）` : '';
+  setNotice('ok', (r.message || successText) + debug);
+  return true;
+}
+
+function viewRegister() {
+  const backText = state.me ? '‹ 返回' : '‹ 返回登录';
+  appEl.innerHTML = `
+    ${topbarHtml()}
+    <div class="wrap auth-page-wrap">
+      <button class="btn auth-back" id="register-back" type="button">${backText}</button>
+      <div class="card auth-form-card">
+        <div class="auth-form-head">
+          <p class="eyebrow">学生账号</p>
+          <h2>注册服务台账号</h2>
+          <p class="sub">注册成功后角色固定为学生。管理员账号不会通过此页面创建。</p>
+        </div>
+        <div id="notice-slot">${alertHtml()}</div>
+        <form id="register-form">
+          <div class="auth-grid">
+            <div class="field">
+              <label for="regUserId">学号</label>
+              <input class="input" id="regUserId" maxlength="32" autocomplete="username"
+                     placeholder="请输入学号" required>
+            </div>
+            <div class="field">
+              <label for="regUserName">姓名</label>
+              <input class="input" id="regUserName" maxlength="50" autocomplete="name"
+                     placeholder="请输入真实姓名" required>
+            </div>
+          </div>
+          <div class="field">
+            <label for="regPhone">手机号</label>
+            <input class="input" id="regPhone" type="tel" inputmode="numeric"
+                   maxlength="11" autocomplete="tel" placeholder="用于身份验证和密码找回" required>
+          </div>
+          <div class="field">
+            <label for="regSmsCode">短信验证码</label>
+            <div class="sms-code-row">
+              <input class="input" id="regSmsCode" type="text" inputmode="numeric"
+                     maxlength="6" autocomplete="one-time-code" placeholder="6 位验证码" required>
+              <button class="btn" id="reg-send-code" type="button">获取验证码</button>
+            </div>
+          </div>
+          <div class="auth-grid">
+            <div class="field">
+              <label for="regPassword">设置密码</label>
+              <input class="input" id="regPassword" type="password" minlength="6" maxlength="20"
+                     autocomplete="new-password" placeholder="6-20 位，含字母和数字" required>
+            </div>
+            <div class="field">
+              <label for="regPassword2">确认密码</label>
+              <input class="input" id="regPassword2" type="password" minlength="6" maxlength="20"
+                     autocomplete="new-password" placeholder="再次输入密码" required>
+            </div>
+          </div>
+          <label class="consent-row">
+            <input id="regPrivacy" type="checkbox" required>
+            <span>我同意平台为身份验证和密码找回保存加密后的手机号。</span>
+          </label>
+          <div class="row auth-actions">
+            <button class="btn btn-primary" id="register-btn" type="submit">验证并注册</button>
+            <button class="btn" id="register-cancel" type="button">返回登录</button>
+          </div>
+        </form>
+      </div>
+    </div>`;
+
+  bindTopbar();
+  document.getElementById('register-back').addEventListener('click', () => go('/'));
+  document.getElementById('register-cancel').addEventListener('click', () => go('/'));
+  document.getElementById('reg-send-code').addEventListener('click', onSendRegisterCode);
+  document.getElementById('register-form').addEventListener('submit', onRegister);
+}
+
+async function onSendRegisterCode() {
+  const userId = document.getElementById('regUserId').value.trim();
+  const userName = document.getElementById('regUserName').value.trim();
+  const phone = document.getElementById('regPhone').value.trim();
+  if (!userId || !userName || !/^1[3-9]\d{9}$/.test(phone)) {
+    setNotice('error', '请先填写正确的学号、姓名和手机号');
+    return;
+  }
+  const btn = document.getElementById('reg-send-code');
+  btn.disabled = true;
+  btn.textContent = '发送中…';
+  const r = await api.sendRegisterSmsCode(userId, userName, phone);
+  if (!showSmsResult(r, '验证码已发送')) {
+    btn.disabled = false;
+    btn.textContent = '获取验证码';
+    return;
+  }
+  startSmsCountdown(btn);
+}
+
+async function onRegister(e) {
+  e.preventDefault();
+  const userId = document.getElementById('regUserId').value.trim();
+  const userName = document.getElementById('regUserName').value.trim();
+  const phone = document.getElementById('regPhone').value.trim();
+  const smsCode = document.getElementById('regSmsCode').value.trim();
+  const password = document.getElementById('regPassword').value;
+  const password2 = document.getElementById('regPassword2').value;
+  const agreed = document.getElementById('regPrivacy').checked;
+
+  if (password !== password2) {
+    setNotice('error', '两次输入的密码不一致');
+    return;
+  }
+  if (!/^\d{6}$/.test(smsCode)) {
+    setNotice('error', '请输入 6 位短信验证码');
+    return;
+  }
+  if (!agreed) {
+    setNotice('error', '请先同意手机号使用说明');
+    return;
+  }
+
+  const btn = document.getElementById('register-btn');
+  btn.disabled = true;
+  btn.textContent = '注册中…';
+  const r = await api.register(userId, userName, phone, smsCode, password, agreed);
+  if (!r.ok) {
+    btn.disabled = false;
+    btn.textContent = '验证并注册';
+    setNotice('error', r.message);
+    return;
+  }
+  await finishLogin(r.data);
+}
+
+function viewForgotPassword() {
+  appEl.innerHTML = `
+    ${topbarHtml()}
+    <div class="wrap auth-page-wrap">
+      <button class="btn auth-back" id="forgot-back" type="button">‹ 返回登录</button>
+      <div class="card auth-form-card">
+        <div class="auth-form-head">
+          <p class="eyebrow">账号找回</p>
+          <h2>重置密码</h2>
+          <p class="sub">验证码会发送到账号已绑定的手机号。未绑定手机号的旧账号请联系管理员。</p>
+        </div>
+        <div id="notice-slot">${alertHtml()}</div>
+        <form id="forgot-form">
+          <div class="field">
+            <label for="forgotUserId">学号</label>
+            <input class="input" id="forgotUserId" maxlength="32" autocomplete="username"
+                   placeholder="请输入学号" required>
+          </div>
+          <div class="field">
+            <label for="forgotSmsCode">短信验证码</label>
+            <div class="sms-code-row">
+              <input class="input" id="forgotSmsCode" type="text" inputmode="numeric"
+                     maxlength="6" autocomplete="one-time-code" placeholder="6 位验证码" required>
+              <button class="btn" id="forgot-send-code" type="button">获取验证码</button>
+            </div>
+          </div>
+          <div class="auth-grid">
+            <div class="field">
+              <label for="forgotPassword">新密码</label>
+              <input class="input" id="forgotPassword" type="password" minlength="6" maxlength="20"
+                     autocomplete="new-password" placeholder="6-20 位，含字母和数字" required>
+            </div>
+            <div class="field">
+              <label for="forgotPassword2">确认新密码</label>
+              <input class="input" id="forgotPassword2" type="password" minlength="6" maxlength="20"
+                     autocomplete="new-password" placeholder="再次输入新密码" required>
+            </div>
+          </div>
+          <div class="row auth-actions">
+            <button class="btn btn-primary" id="forgot-btn" type="submit">重置密码</button>
+            <button class="btn" id="forgot-cancel" type="button">返回登录</button>
+          </div>
+        </form>
+      </div>
+    </div>`;
+
+  bindTopbar();
+  document.getElementById('forgot-back').addEventListener('click', () => go('/'));
+  document.getElementById('forgot-cancel').addEventListener('click', () => go('/'));
+  document.getElementById('forgot-send-code').addEventListener('click', onSendResetCode);
+  document.getElementById('forgot-form').addEventListener('submit', onResetPassword);
+}
+
+async function onSendResetCode() {
+  const userId = document.getElementById('forgotUserId').value.trim();
+  if (!userId) {
+    setNotice('error', '请先输入学号');
+    return;
+  }
+  const btn = document.getElementById('forgot-send-code');
+  btn.disabled = true;
+  btn.textContent = '发送中…';
+  const r = await api.sendResetSmsCode(userId);
+  if (!showSmsResult(r, '如账号已绑定手机号，验证码将发送到绑定手机')) {
+    btn.disabled = false;
+    btn.textContent = '获取验证码';
+    return;
+  }
+  startSmsCountdown(btn);
+}
+
+async function onResetPassword(e) {
+  e.preventDefault();
+  const userId = document.getElementById('forgotUserId').value.trim();
+  const smsCode = document.getElementById('forgotSmsCode').value.trim();
+  const password = document.getElementById('forgotPassword').value;
+  const password2 = document.getElementById('forgotPassword2').value;
+  if (password !== password2) {
+    setNotice('error', '两次输入的新密码不一致');
+    return;
+  }
+  const btn = document.getElementById('forgot-btn');
+  btn.disabled = true;
+  btn.textContent = '重置中…';
+  const r = await api.resetPassword(userId, smsCode, password);
+  if (!r.ok) {
+    btn.disabled = false;
+    btn.textContent = '重置密码';
+    setNotice('error', r.message);
+    return;
+  }
+  state.notice = { type: 'ok', text: '密码已重置，请使用新密码登录' };
   go('/');
 }
 
@@ -739,18 +1073,37 @@ function viewMyOrders() {
       ${needPwdAlert()}
       ${listHeadHtml()}
 
-      <div class="filters">
-        <select class="input" id="f-status">
-          ${STATUS_FILTERS.map(o =>
-            `<option value="${o.value}"${o.value === q.status ? ' selected' : ''}>${o.label}</option>`).join('')}
-        </select>
-        <input class="input" id="f-keyword" type="search" placeholder="搜索工单内容"
-               value="${esc(q.keyword)}" autocomplete="off">
-        <button class="btn btn-primary" id="f-search" type="button">查询</button>
-      </div>
+      <div class="home-dashboard">
+        <section class="home-main-area" aria-label="我的工单">
+          <div class="status-filter-bar">
+            <span class="status-filter-label">状态</span>
+            <div class="status-tabs" id="status-tabs" role="group" aria-label="按工单状态筛选">
+              ${STATUS_FILTERS.map(o => `
+                <button class="status-tab${o.value === q.status ? ' active' : ''}" type="button"
+                        data-status="${o.value}" aria-pressed="${o.value === q.status ? 'true' : 'false'}">
+                  ${o.label.replace('全部状态', '全部')}
+                </button>`).join('')}
+            </div>
+            <select class="input status-select-hidden" id="f-status" aria-hidden="true" tabindex="-1">
+              ${STATUS_FILTERS.map(o =>
+                `<option value="${o.value}"${o.value === q.status ? ' selected' : ''}>${o.label}</option>`).join('')}
+            </select>
+          </div>
 
-      <div id="order-list"></div>
-      <div id="order-pager"></div>
+          <div class="filters">
+            <input class="input" id="f-keyword" type="search" placeholder="搜索工单内容"
+                   value="${esc(q.keyword)}" autocomplete="off">
+            <button class="btn btn-primary" id="f-search" type="button">查询</button>
+          </div>
+
+          <div id="order-list"></div>
+          <div id="order-pager"></div>
+        </section>
+
+        <aside class="home-insights" id="home-insights" aria-label="服务资讯">
+          ${homeInsightsSkeletonHtml()}
+        </aside>
+      </div>
     </div>`;
 
   bindTopbar();
@@ -762,14 +1115,169 @@ function viewMyOrders() {
   // 这叫"事件委托"—— 一个监听器管住里面所有（包括以后新增的）元素。
   document.getElementById('f-search').addEventListener('click', onSearch);
   document.getElementById('f-status').addEventListener('change', onSearch);
+  document.getElementById('status-tabs').addEventListener('click', onStatusTabClick);
   document.getElementById('f-keyword').addEventListener('keydown', (e) => {
     // 手机上键盘的"搜索/回车"键应该等于点"查询"，否则按了没反应很奇怪
     if (e.key === 'Enter') { e.preventDefault(); onSearch(); }
   });
   document.getElementById('order-list').addEventListener('click', onOrderClick);
   document.getElementById('order-pager').addEventListener('click', onPagerClick);
+  document.getElementById('home-insights').addEventListener('click', onHomeInfoClick);
 
   loadOrders();
+  loadHomeInsights();
+}
+
+function homeInsightsSkeletonHtml() {
+  return `
+    <section class="home-info-card home-info-loading" aria-hidden="true">
+      <div class="skeleton-line short"></div>
+      <div class="skeleton-line medium"></div>
+      <div class="skeleton-line"></div>
+      <div class="skeleton-line"></div>
+    </section>
+    <section class="home-info-card home-info-loading" aria-hidden="true">
+      <div class="skeleton-line short"></div>
+      <div class="skeleton-line"></div>
+      <div class="skeleton-line medium"></div>
+      <div class="skeleton-line"></div>
+    </section>`;
+}
+
+function homeApiResult(settled) {
+  if (!settled || settled.status !== 'fulfilled') {
+    return { ok: false, message: '网络连接失败，请稍后重试。' };
+  }
+  return settled.value || { ok: false, message: '暂时无法加载，请稍后重试。' };
+}
+
+function homeSummary(text, maxLength) {
+  const value = String(text || '').replace(/\s+/g, ' ').trim();
+  return value.length > maxLength ? value.slice(0, maxLength) + '…' : value;
+}
+
+async function loadHomeInsights() {
+  const box = document.getElementById('home-insights');
+  if (!box) return;
+  box.innerHTML = homeInsightsSkeletonHtml();
+
+  const settled = await Promise.allSettled([
+    api.announcements(),
+    api.faqs({})
+  ]);
+  const announcementResult = homeApiResult(settled[0]);
+  const faqResult = homeApiResult(settled[1]);
+
+  // 请求回来时页面可能已经切走；此时不能把内容写到一个已经脱离文档的容器里。
+  const currentBox = document.getElementById('home-insights');
+  if (!currentBox || currentBox !== box) return;
+
+  const announcements = announcementResult.ok && Array.isArray(announcementResult.data)
+    ? announcementResult.data
+    : null;
+  const faqs = faqResult.ok && Array.isArray(faqResult.data)
+    ? faqResult.data.filter(f => f.status === 'PUBLISHED')
+    : null;
+
+  currentBox.innerHTML =
+    homeAnnouncementsHtml(announcements, announcementResult) +
+    homeFaqsHtml(faqs, faqResult);
+}
+
+function homeInfoStateHtml(message, retryLabel) {
+  return `
+    <div class="home-info-state" role="status">
+      <span class="home-info-state-mark" aria-hidden="true">·</span>
+      <p>${esc(message)}</p>
+      <button class="home-info-link" type="button" data-home-retry>${retryLabel || '重试'}</button>
+    </div>`;
+}
+
+function homeAnnouncementsHtml(list, result) {
+  const rows = list === null
+    ? homeInfoStateHtml(result.message || '服务公告暂时无法加载。')
+    : (list.length
+      ? list.slice(0, 2).map(function (item, index) {
+        return `
+          <button class="home-notice-item${index > 0 ? ' home-info-extra' : ''}" type="button"
+                  data-home-notice-id="${esc(item.noticeId)}">
+            <span class="home-notice-date">${esc(fmtTime(item.publishTime))}</span>
+            <span class="home-notice-copy">
+              <strong>${esc(item.title || '（无标题）')}</strong>
+              <span>${esc(homeSummary(item.content, 62))}</span>
+            </span>
+            <span class="home-item-arrow" aria-hidden="true">›</span>
+          </button>`;
+      }).join('')
+      : homeInfoStateHtml('当前没有服务公告。', '刷新'));
+
+  return `
+    <section class="home-info-card">
+      <header class="home-info-head">
+        <span class="home-info-icon notice" aria-hidden="true">播</span>
+        <span class="home-info-heading">
+          <strong>服务公告</strong>
+          <small>${list ? '共 ' + list.length + ' 条' : '信息通知'}</small>
+        </span>
+        <button class="home-info-more" type="button" data-home-route="/announcements">全部</button>
+      </header>
+      <div class="home-info-list">${rows}</div>
+    </section>`;
+}
+
+function homeFaqsHtml(list, result) {
+  const rows = list === null
+    ? homeInfoStateHtml(result.message || '推荐问题暂时无法加载。')
+    : (list.length
+      ? list.slice(0, 4).map(function (item, index) {
+        return `
+          <button class="home-faq-item${index > 2 ? ' home-info-extra' : ''}" type="button"
+                  data-home-faq-id="${esc(item.faqId)}">
+            <span class="home-faq-index">${String(index + 1).padStart(2, '0')}</span>
+            <span class="home-faq-copy">
+              <strong>${esc(item.question || '')}</strong>
+              <small>${esc(item.category || '未分类')}</small>
+            </span>
+            <span class="home-item-arrow" aria-hidden="true">›</span>
+          </button>`;
+      }).join('')
+      : homeInfoStateHtml('当前还没有推荐问题。', '刷新'));
+
+  return `
+    <section class="home-info-card">
+      <header class="home-info-head">
+        <span class="home-info-icon faq" aria-hidden="true">问</span>
+        <span class="home-info-heading">
+          <strong>推荐问题</strong>
+          <small>${list ? '共 ' + list.length + ' 个' : '常见问题'}</small>
+        </span>
+        <button class="home-info-more" type="button" data-home-route="/faqs">全部</button>
+      </header>
+      <div class="home-info-list">${rows}</div>
+    </section>`;
+}
+
+function onHomeInfoClick(e) {
+  const retry = e.target.closest('[data-home-retry]');
+  if (retry) {
+    loadHomeInsights();
+    return;
+  }
+
+  const route = e.target.closest('[data-home-route]');
+  if (route) {
+    go(route.dataset.homeRoute);
+    return;
+  }
+
+  const notice = e.target.closest('[data-home-notice-id]');
+  if (notice) {
+    go('/announcements/' + encodeURIComponent(notice.dataset.homeNoticeId));
+    return;
+  }
+
+  const faq = e.target.closest('[data-home-faq-id]');
+  if (faq) go('/faqs/' + encodeURIComponent(faq.dataset.homeFaqId));
 }
 
 /** 点"查询"、改状态、敲回车 —— 都走这里。 */
@@ -779,8 +1287,24 @@ async function onSearch() {
   state.orderQuery.page = 1;
   state.orderQuery.status = document.getElementById('f-status').value;
   state.orderQuery.keyword = document.getElementById('f-keyword').value.trim();
+  paintStatusTabs(state.orderQuery.status);
   setNotice(null, null);
   await loadOrders();
+}
+
+function onStatusTabClick(e) {
+  const tab = e.target.closest('.status-tab');
+  if (!tab) return;
+  document.getElementById('f-status').value = tab.dataset.status || '';
+  onSearch();
+}
+
+function paintStatusTabs(status) {
+  document.querySelectorAll('#status-tabs .status-tab').forEach(function (tab) {
+    const active = (tab.dataset.status || '') === (status || '');
+    tab.classList.toggle('active', active);
+    tab.setAttribute('aria-pressed', active ? 'true' : 'false');
+  });
 }
 
 /** 拉一页工单回来，只重画"列表 + 分页"两块，**不重画整页**。 */
@@ -790,7 +1314,7 @@ async function loadOrders() {
   if (!listBox) return;
 
   const q = state.orderQuery;
-  listBox.innerHTML = '<div class="empty">正在加载…</div>';
+  listBox.innerHTML = orderSkeletonHtml(3);
   if (pagerBox) pagerBox.innerHTML = '';
 
   const r = await api.workOrders({
@@ -808,7 +1332,12 @@ async function loadOrders() {
   }
 
   if (!r.ok) {
-    listBox.innerHTML = `<div class="empty">加载失败：${esc(r.message)}</div>`;
+    listBox.innerHTML = emptyStateHtml(
+      '加载失败',
+      esc(r.message),
+      '<button class="btn" id="retry-orders" type="button">重新加载</button>',
+      'error'
+    );
     return;
   }
 
@@ -822,14 +1351,68 @@ async function loadOrders() {
 
   if (!list.length) {
     const filtered = !!(q.status || q.keyword);
-    listBox.innerHTML = '<div class="empty">' +
-      (filtered ? '没有符合条件的工单，换个条件试试。' : '这里还没有工单。') +
-      '</div>';
+    if (filtered) {
+      listBox.innerHTML = emptyStateHtml(
+        '没有找到匹配的工单',
+        '换一个状态或关键词试试，也可以直接查看全部工单。',
+        '<button class="btn" id="clear-order-filters" type="button">清除筛选</button>',
+        'search'
+      );
+    } else if (state.me.role === 'STUDENT') {
+      listBox.innerHTML = emptyStateHtml(
+        '还没有提交过工单',
+        '遇到学时录入、活动咨询或规则疑问时，可以从这里发起第一次沟通。',
+        '<button class="btn btn-primary" id="empty-new-order" type="button">提交第一张工单</button>',
+        'inbox'
+      );
+    } else {
+      listBox.innerHTML = emptyStateHtml(
+        '当前没有需要处理的工单',
+        '新的工单进入服务台后会出现在这里。',
+        '<button class="btn" id="retry-orders" type="button">刷新列表</button>',
+        'check'
+      );
+    }
   } else {
     listBox.innerHTML = list.map(orderCardHtml).join('');
   }
 
   if (pagerBox) pagerBox.innerHTML = pagerHtml();
+}
+
+function orderSkeletonHtml(count) {
+  return `
+    <div class="skeleton-list" role="status" aria-live="polite">
+      <span class="sr-only">正在加载工单…</span>
+      ${Array.from({ length: count }, function () {
+        return `
+          <div class="card skeleton-card" aria-hidden="true">
+            <div class="skeleton-line short"></div>
+            <div class="skeleton-line"></div>
+            <div class="skeleton-line medium"></div>
+            <div class="skeleton-meta">
+              <div class="skeleton-line short"></div>
+              <div class="skeleton-line short"></div>
+            </div>
+          </div>`;
+      }).join('')}
+    </div>`;
+}
+
+function emptyStateHtml(title, text, actions, icon) {
+  const marks = {
+    search: '⌕',
+    inbox: '＋',
+    check: '✓',
+    error: '!'
+  };
+  return `
+    <div class="empty-state empty-state-${icon}">
+      <span class="empty-state-icon" aria-hidden="true">${marks[icon] || '·'}</span>
+      <h3>${title}</h3>
+      <p>${text}</p>
+      ${actions ? `<div class="empty-state-actions">${actions}</div>` : ''}
+    </div>`;
 }
 
 /** 一张工单 = 一个可点的卡片。 */
@@ -874,6 +1457,26 @@ function pagerHtml() {
 }
 
 function onOrderClick(e) {
+  if (e.target.closest('#clear-order-filters')) {
+    state.orderQuery.page = 1;
+    state.orderQuery.status = '';
+    state.orderQuery.keyword = '';
+    const status = document.getElementById('f-status');
+    const keyword = document.getElementById('f-keyword');
+    if (status) status.value = '';
+    if (keyword) keyword.value = '';
+    paintStatusTabs('');
+    loadOrders();
+    return;
+  }
+  if (e.target.closest('#empty-new-order')) {
+    go('/submit');
+    return;
+  }
+  if (e.target.closest('#retry-orders')) {
+    loadOrders();
+    return;
+  }
   const card = e.target.closest('.order-card');
   if (!card) return;
   // 从卡片上的 data-id 拼出详情页地址： #/orders/WO20261005000001
@@ -1217,12 +1820,12 @@ async function onSubmit() {
 async function viewOrderDetail(id) {
   appEl.innerHTML = `
     ${topbarHtml()}
-    <div class="wrap">
+    <div class="wrap detail-wrap">
       <div id="notice-slot">${alertHtml()}</div>
       <div class="row">
         <button class="btn" id="d-back" type="button">‹ 返回列表</button>
       </div>
-      <div id="detail-box"><div class="empty">正在加载…</div></div>
+      <div id="detail-box">${detailSkeletonHtml()}</div>
     </div>`;
 
   // 换了一张单就是换了一个场景：幂等号必须重来。否则后端会把"上一张单的追问结果"
@@ -1246,6 +1849,8 @@ async function viewOrderDetail(id) {
 async function loadDetail(id) {
   const box = document.getElementById('detail-box');
   if (!box) return;
+  const detailWrap = document.querySelector('.detail-wrap');
+  if (detailWrap) detailWrap.classList.remove('has-action-dock');
 
   const r = await api.workOrderDetail(id);
   if (r.needLogin) { state.me = null; render(); return; }
@@ -1269,6 +1874,9 @@ async function loadDetail(id) {
   state.detailVersion = d.version;          // 「确认解决」要把这个原样传回去
   document.title = state.detailId + ' · 第二课堂学时答疑';
   box.innerHTML = detailHtml(d);
+  if (detailWrap) {
+    detailWrap.classList.toggle('has-action-dock', !!document.getElementById('detail-action-dock'));
+  }
   bindDetailActions();
 
   // 干事的回复卡上有「插入模板」下拉：这里异步去拉模板填进去。
@@ -1402,6 +2010,69 @@ async function markDetailRead(id) {
   await refreshUnread();
 }
 
+function detailSkeletonHtml() {
+  return `
+    <div class="detail-skeleton" role="status" aria-live="polite">
+      <span class="sr-only">正在加载工单详情…</span>
+      <div class="card skeleton-card" aria-hidden="true">
+        <div class="skeleton-line short"></div>
+        <div class="skeleton-line"></div>
+        <div class="skeleton-steps">
+          <div class="skeleton-dot"></div>
+          <div class="skeleton-line"></div>
+          <div class="skeleton-dot"></div>
+          <div class="skeleton-line"></div>
+          <div class="skeleton-dot"></div>
+        </div>
+      </div>
+      <div class="card skeleton-card" aria-hidden="true">
+        <div class="skeleton-line medium"></div>
+        <div class="skeleton-line"></div>
+        <div class="skeleton-line"></div>
+        <div class="skeleton-line medium"></div>
+      </div>
+      <div class="card skeleton-card" aria-hidden="true">
+        <div class="skeleton-line short"></div>
+        <div class="skeleton-line"></div>
+        <div class="skeleton-line medium"></div>
+      </div>
+    </div>`;
+}
+
+function detailDockHtml(d) {
+  if (!state.me) return '';
+  const role = state.me.role;
+  let copy = '';
+  let actions = '';
+
+  if (role === 'STUDENT' && d.status === 'REPLIED') {
+    copy = '<strong>问题已得到回复</strong><small>确认解决，或继续追问</small>';
+    actions = `
+      <button class="btn" type="button" data-scroll-to="#d-follow">继续追问</button>
+      <button class="btn btn-primary" id="d-confirm-dock" type="button">确认解决</button>`;
+  } else if (role === 'STUDENT' && d.status === 'CLOSED') {
+    copy = '<strong>工单已关闭</strong><small>问题再次出现时可以继续咨询</small>';
+    actions = '<button class="btn btn-primary" type="button" data-scroll-to="#d-reconsult">再次咨询</button>';
+  } else if (role === 'STAFF' && d.status === 'PENDING' && !d.handlerId) {
+    copy = '<strong>这张工单还在等待受理</strong><small>接单后由你继续跟进</small>';
+    actions = '<button class="btn btn-primary" type="button" data-scroll-to="#s-accept">接单处理</button>';
+  } else if (role === 'STAFF' && d.handlerId === state.me.userId &&
+             (d.status === 'PROCESSING' || d.status === 'REPLIED')) {
+    copy = `<strong>${d.status === 'REPLIED' ? '已回复学生' : '工单处理中'}</strong><small>需要时可以直接补充回复</small>`;
+    actions = '<button class="btn btn-primary" type="button" data-scroll-to="#s-reply">立即回复</button>';
+  } else if (role === 'ADMIN' && d.status === 'PENDING') {
+    copy = '<strong>待接单工单</strong><small>如有必要可填写原因并强制关闭</small>';
+    actions = '<button class="btn" type="button" data-scroll-to="#a-close-remark">前往处理</button>';
+  }
+
+  if (!actions) return '';
+  return `
+    <div class="mobile-action-dock" id="detail-action-dock" aria-label="工单快捷操作">
+      <div class="dock-copy">${copy}</div>
+      <div class="dock-actions">${actions}</div>
+    </div>`;
+}
+
 /** 整套详情页面。 */
 function detailHtml(d) {
   const cls = BADGE_CLASS[d.status] || 'badge-closed';
@@ -1443,7 +2114,8 @@ function detailHtml(d) {
       ${timelineHtml(d.messages)}
     </div>
 
-    ${actionCardHtml(d)}`;
+    ${actionCardHtml(d)}
+    ${detailDockHtml(d)}`;
 }
 
 /**
@@ -1943,8 +2615,24 @@ function timelineHtml(msgs) {
 
 /** 详情页里的点击：附件下载 + 学生三件事 + 干事四件事，全从这里分发。 */
 async function onDetailClick(e) {
+  const jump = e.target.closest('[data-scroll-to]');
+  if (jump) {
+    const target = document.querySelector(jump.dataset.scrollTo);
+    if (target) {
+      target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      target.classList.add('jump-highlight');
+      window.setTimeout(() => target.classList.remove('jump-highlight'), 1400);
+      if (typeof target.focus === 'function') {
+        window.setTimeout(() => target.focus({ preventScroll: true }), 420);
+      }
+    }
+    return;
+  }
   // ① 学生：确认解决
-  if (e.target.closest('#d-confirm')) { await onConfirmClose(); return; }
+  if (e.target.closest('#d-confirm') || e.target.closest('#d-confirm-dock')) {
+    await onConfirmClose();
+    return;
+  }
   // ② 学生：发送追问
   if (e.target.closest('#d-follow-btn')) { await onFollowUp(); return; }
   // ③ 学生：再次咨询 —— 跳到"再次咨询"表单。
@@ -2051,13 +2739,16 @@ async function onConfirmClose() {
   }
 
   const btn = document.getElementById('d-confirm');
+  const dockBtn = document.getElementById('d-confirm-dock');
   if (btn) { btn.disabled = true; btn.textContent = '处理中…'; }
+  if (dockBtn) { dockBtn.disabled = true; dockBtn.textContent = '处理中…'; }
   setNotice(null, null);
 
   // ⚠️ 必须带上详情里拿到的 version（后端靠它做乐观锁）
   const r = await api.confirmWorkOrder(state.detailId, state.detailVersion);
 
   if (btn) { btn.disabled = false; btn.textContent = '确认解决'; }
+  if (dockBtn) { dockBtn.disabled = false; dockBtn.textContent = '确认解决'; }
   if (r.needLogin) { state.me = null; render(); return; }
 
   if (!r.ok) {
@@ -2616,6 +3307,8 @@ async function onReadAll() {
 /* ---------- 八、页面：修改密码 ---------- */
 
 function viewPassword() {
+  const phoneBound = !!(state.me && state.me.phoneBound);
+  const maskedPhone = state.me && state.me.maskedPhone ? state.me.maskedPhone : '未绑定';
   appEl.innerHTML = `
     ${topbarHtml()}
     <div class="wrap">
@@ -2642,11 +3335,116 @@ function viewPassword() {
           </div>
         </form>
       </div>
+
+      <div class="card account-phone-card">
+        <h2>${phoneBound ? '更换绑定手机' : '绑定手机号'}</h2>
+        <p class="sub">
+          当前手机号：<strong>${esc(maskedPhone)}</strong>。
+          手机号用于新设备登录验证和密码找回，数据库中加密保存。
+        </p>
+        <div id="phone-notice-slot"></div>
+        ${phoneBound ? `
+          <div class="field">
+            <label for="oldPhoneCode">原手机验证码</label>
+            <div class="sms-code-row">
+              <input class="input" id="oldPhoneCode" maxlength="6" inputmode="numeric"
+                     placeholder="验证原手机号" autocomplete="one-time-code">
+              <button class="btn" id="send-old-phone-code" type="button">发送到原手机</button>
+            </div>
+          </div>` : ''}
+        <div class="field">
+          <label for="newPhone">新手机号</label>
+          <input class="input" id="newPhone" type="tel" inputmode="numeric"
+                 maxlength="11" autocomplete="tel" placeholder="请输入新的 11 位手机号">
+        </div>
+        <div class="field">
+          <label for="newPhoneCode">新手机验证码</label>
+          <div class="sms-code-row">
+            <input class="input" id="newPhoneCode" maxlength="6" inputmode="numeric"
+                   placeholder="验证新手机号" autocomplete="one-time-code">
+            <button class="btn" id="send-new-phone-code" type="button">发送到新手机</button>
+          </div>
+        </div>
+        <div class="row">
+          <button class="btn btn-primary" id="change-phone-btn" type="button">
+            ${phoneBound ? '确认更换手机' : '绑定手机号'}
+          </button>
+        </div>
+      </div>
     </div>`;
 
   document.getElementById('pwd-form').addEventListener('submit', onChangePassword);
   document.getElementById('pwd-cancel').addEventListener('click', () => go('/'));
+  const oldPhoneBtn = document.getElementById('send-old-phone-code');
+  if (oldPhoneBtn) oldPhoneBtn.addEventListener('click', () => onSendPhoneCode('OLD'));
+  document.getElementById('send-new-phone-code')
+    .addEventListener('click', () => onSendPhoneCode('NEW'));
+  document.getElementById('change-phone-btn').addEventListener('click', onChangePhone);
   bindTopbar();
+}
+
+async function onSendPhoneCode(target) {
+  const isNew = target === 'NEW';
+  const btn = document.getElementById(isNew ? 'send-new-phone-code' : 'send-old-phone-code');
+  const newPhone = isNew ? document.getElementById('newPhone').value.trim() : '';
+  if (isNew && !/^1[3-9]\d{9}$/.test(newPhone)) {
+    setPhoneNotice('error', '请输入正确的 11 位新手机号');
+    return;
+  }
+  btn.disabled = true;
+  btn.textContent = '发送中…';
+  const r = await api.sendPhoneSmsCode(target, newPhone);
+  if (!r.ok) {
+    btn.disabled = false;
+    btn.textContent = isNew ? '发送到新手机' : '发送到原手机';
+    setPhoneNotice('error', r.message);
+    return;
+  }
+  const debug = r.data && r.data.debugCode ? ` 验证码：${r.data.debugCode}` : '';
+  setPhoneNotice('ok', r.message + debug);
+  startSmsCountdown(btn);
+}
+
+function setPhoneNotice(type, message) {
+  const slot = document.getElementById('phone-notice-slot');
+  if (!slot) return;
+  slot.innerHTML = type
+    ? `<div class="alert alert-${type === 'error' ? 'error' : type}">${esc(message)}</div>`
+    : '';
+}
+
+async function onChangePhone() {
+  const newPhone = document.getElementById('newPhone').value.trim();
+  const newSmsCode = document.getElementById('newPhoneCode').value.trim();
+  const oldInput = document.getElementById('oldPhoneCode');
+  const oldSmsCode = oldInput ? oldInput.value.trim() : '';
+  if (!/^1[3-9]\d{9}$/.test(newPhone)) {
+    setPhoneNotice('error', '请输入正确的 11 位新手机号');
+    return;
+  }
+  if (!/^\d{6}$/.test(newSmsCode) || (oldInput && !/^\d{6}$/.test(oldSmsCode))) {
+    setPhoneNotice('error', '请输入完整的 6 位短信验证码');
+    return;
+  }
+
+  const btn = document.getElementById('change-phone-btn');
+  btn.disabled = true;
+  btn.textContent = '提交中…';
+  const r = await api.changePhone(newPhone, oldSmsCode, newSmsCode);
+  if (!r.ok) {
+    btn.disabled = false;
+    btn.textContent = oldInput ? '确认更换手机' : '绑定手机号';
+    setPhoneNotice('error', r.message);
+    return;
+  }
+
+  await api.logout();
+  stopUnreadPolling();
+  clearToken();
+  state.me = null;
+  state.unreadCount = 0;
+  state.notice = { type: 'ok', text: '手机号已更新，请重新登录' };
+  go('/');
 }
 
 async function onChangePassword(e) {
@@ -2684,7 +3482,7 @@ async function onChangePassword(e) {
 /* ---------- 九、页面：公告 ---------- */
 
 /** 公告（路由 #/announcements）。只读 —— 后端已经把"展示中的、没过期的"筛好排好了。 */
-async function viewAnnouncements() {
+async function viewAnnouncements(focusNoticeId) {
   // 游客没有"上一页"可回（他唯一能去的地方就是登录页），
   // 所以按钮文案跟着身份走 —— 别让人点一个写着"返回"的按钮，却被带到登录页。
   const backText = state.me ? '‹ 返回' : '‹ 去登录';
@@ -2715,6 +3513,15 @@ async function viewAnnouncements() {
   box.innerHTML = list.length
     ? list.map(noticeCardHtml).join('')
     : '<div class="empty">当前没有公告。</div>';
+
+  if (focusNoticeId && list.length) {
+    const target = Array.from(box.querySelectorAll('[data-notice-id]'))
+      .find(item => item.dataset.noticeId === focusNoticeId);
+    if (target) {
+      target.classList.add('jump-highlight');
+      target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+  }
 }
 
 /**
@@ -2729,7 +3536,7 @@ async function viewAnnouncements() {
  */
 function noticeCardHtml(a) {
   return `
-    <div class="card notice-card">
+    <div class="card notice-card" data-notice-id="${esc(a.noticeId)}">
       <div class="notice-head">
         <h2 class="notice-title">${esc(a.title || '（无标题）')}</h2>
       </div>
@@ -2750,7 +3557,9 @@ function noticeCardHtml(a) {
  *
  * 这个页面**没有分页** —— FAQ 接口返回的就是一个数组（契约里它连分页参数都没有）。
  */
-function viewFaqs() {
+async function viewFaqs(focusFaqId) {
+  // 深链接必须从"全部问题"开始，否则上一次的筛选条件可能刚好把目标藏掉。
+  if (focusFaqId) state.faqQuery = { category: '', keyword: '' };
   const q = state.faqQuery;
   // 游客没有"上一页"，返回按钮直接把他送回登录页（和公告页同一个写法）
   const backText = state.me ? '‹ 返回' : '‹ 去登录';
@@ -2788,7 +3597,22 @@ function viewFaqs() {
   // 事件委托：列表重画也不会丢监听器
   document.getElementById('faq-list').addEventListener('click', onFaqClick);
 
-  loadFaqs();
+  await loadFaqs();
+
+  if (focusFaqId) {
+    const box = document.getElementById('faq-list');
+    const target = box && Array.from(box.querySelectorAll('.faq-item'))
+      .find(item => item.dataset.id === focusFaqId);
+    if (target) {
+      target.classList.add('jump-highlight');
+      target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      // 复用原有点击逻辑：会向后端请求答案，同时只把这一条 FAQ 的浏览量加一。
+      target.click();
+      window.setTimeout(() => {
+        target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }, 360);
+    }
+  }
 }
 
 async function onFaqSearch() {
@@ -4142,7 +4966,9 @@ const OP_TYPE_GROUPS = [
   {
     label: '账号',
     items: [
-      ['LOGIN', '登录'], ['LOGOUT', '登出'], ['CHANGE_PASSWORD', '修改密码'],
+      ['REGISTER', '学生注册'], ['LOGIN', '登录'], ['LOGOUT', '登出'],
+      ['CHANGE_PASSWORD', '修改密码'], ['RESET_PASSWORD', '重置密码'],
+      ['CHANGE_PHONE', '修改手机号'],
       ['DISABLE_USER', '禁用账号'], ['ENABLE_USER', '启用账号'], ['RESET_PASSWORD', '重置密码']
     ]
   },
@@ -4529,14 +5355,31 @@ function render() {
   //    ⚠️ 用**白名单**而不是"排除登录页"的黑名单：以后加新页面，默认是不放行的，
   //       不会被顺手一起放出去。
   if (!state.me) {
-    if (currentRoute() === '/announcements') {
-      document.title = '公告 · 第二课堂学时答疑';
-      viewAnnouncements();
+    const publicRoute = currentRoute();
+    if (publicRoute === '/register') {
+      document.title = '学生注册 · 第二课堂学时答疑';
+      viewRegister();
       return;
     }
-    if (currentRoute() === '/faqs') {
+    if (publicRoute === '/forgot-password') {
+      document.title = '找回密码 · 第二课堂学时答疑';
+      viewForgotPassword();
+      return;
+    }
+    if (publicRoute === '/announcements' || publicRoute.indexOf('/announcements/') === 0) {
+      const focusId = publicRoute.indexOf('/announcements/') === 0
+        ? decodeURIComponent(publicRoute.slice('/announcements/'.length))
+        : '';
+      document.title = '公告 · 第二课堂学时答疑';
+      viewAnnouncements(focusId);
+      return;
+    }
+    if (publicRoute === '/faqs' || publicRoute.indexOf('/faqs/') === 0) {
+      const focusId = publicRoute.indexOf('/faqs/') === 0
+        ? decodeURIComponent(publicRoute.slice('/faqs/'.length))
+        : '';
       document.title = '常见问题 · 第二课堂学时答疑';
-      viewFaqs();
+      viewFaqs(focusId);
       return;
     }
     document.title = '登录 · 第二课堂学时答疑';
@@ -4545,6 +5388,20 @@ function render() {
   }
 
   const route = currentRoute();
+
+  // 首页资讯卡使用带 ID 的深链接；进入完整页面后自动定位并高亮目标。
+  if (route.indexOf('/announcements/') === 0) {
+    const id = decodeURIComponent(route.slice('/announcements/'.length));
+    document.title = '公告 · 第二课堂学时答疑';
+    viewAnnouncements(id);
+    return;
+  }
+  if (route.indexOf('/faqs/') === 0) {
+    const id = decodeURIComponent(route.slice('/faqs/'.length));
+    document.title = '常见问题 · 第二课堂学时答疑';
+    viewFaqs(id);
+    return;
+  }
 
   // 详情页的地址是带单号的（#/orders/WO20261005000001），所以得**先**按前缀判一下：
   // 下面的 switch 只能精确匹配固定字符串，接不住这种"半固定"的地址。

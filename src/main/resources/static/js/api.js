@@ -14,6 +14,7 @@
    ============================================================= */
 
 const TOKEN_KEY = 'sc_token';
+const DEVICE_KEY = 'sc_device_token';
 
 /** 前后端同源（都由这个 Spring Boot 服务提供），所以直接用相对路径，不用写域名。 */
 const BASE = '';
@@ -30,6 +31,14 @@ export function setToken(token) {
 
 export function clearToken() {
   localStorage.removeItem(TOKEN_KEY);
+}
+
+export function getDeviceToken() {
+  return localStorage.getItem(DEVICE_KEY) || '';
+}
+
+export function setDeviceToken(token) {
+  if (token) localStorage.setItem(DEVICE_KEY, token);
 }
 
 /* ---------- 底层：发一个请求，把结果统一成 { ok, message, data, httpStatus } ---------- */
@@ -172,8 +181,30 @@ export const api = {
   /* ---------- 认证（⑩ 第一步只用到这 4 个）---------- */
 
   /** 登录。成功时 data = { token, userId, userName, role, needChangePassword } */
-  login(userId, password) {
-    return request('POST', '/api/auth/login', { userId, password });
+  login(userId, password, deviceToken) {
+    return request('POST', '/api/auth/login', { userId, password, deviceToken });
+  },
+
+  verifyLoginSms(challengeId, smsCode) {
+    return request('POST', '/api/auth/login/sms/verify', { challengeId, smsCode });
+  },
+
+  sendRegisterSmsCode(userId, userName, phone) {
+    return request('POST', '/api/auth/register/sms-code', { userId, userName, phone });
+  },
+
+  register(userId, userName, phone, smsCode, password, agreedToPrivacy) {
+    return request('POST', '/api/auth/register', {
+      userId, userName, phone, smsCode, password, agreedToPrivacy
+    });
+  },
+
+  sendResetSmsCode(userId) {
+    return request('POST', '/api/auth/password/reset/sms-code', { userId });
+  },
+
+  resetPassword(userId, smsCode, newPassword) {
+    return request('POST', '/api/auth/password/reset', { userId, smsCode, newPassword });
   },
 
   /** 当前登录人。data = { userId, userName, role, openId, subscribeStatus } */
@@ -189,6 +220,14 @@ export const api = {
   /** 改密码。新密码要求 6-20 位且同时含字母和数字（服务端校验）。 */
   changePassword(oldPassword, newPassword) {
     return request('PUT', '/api/auth/password', { oldPassword, newPassword });
+  },
+
+  sendPhoneSmsCode(target, newPhone) {
+    return request('POST', '/api/auth/phone/sms-code', { target, newPhone });
+  },
+
+  changePhone(newPhone, oldSmsCode, newSmsCode) {
+    return request('PUT', '/api/auth/phone', { newPhone, oldSmsCode, newSmsCode });
   },
 
   /* ---------- 工单（⑩ 第二步：我的工单列表）---------- */
