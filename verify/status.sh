@@ -23,7 +23,7 @@
 #     2 = 用法错误
 #
 # 环境变量（一般不用改）：
-#     SC_SSH_HOST   默认 root@<你的服务器IP>
+#     SC_SSH_HOST   服务器地址（root@IP）；不设就读 verify/.server-host，两者都没有则跳过线上检查
 #     SC_SSH_KEY    默认 ~/.ssh/workbuddy_sc_ed25519
 # ============================================================================
 
@@ -51,7 +51,14 @@ else
   G=''; R=''; Y=''; D=''; N=''
 fi
 
-SSH_HOST="${SC_SSH_HOST:-root@<你的服务器IP>}"
+SSH_HOST="${SC_SSH_HOST:-}"
+# 🔴 服务器地址**不进仓库**（仓库是公开的）。取值顺序：
+#     1. 环境变量 SC_SSH_HOST（临时用：SC_SSH_HOST=root@1.2.3.4 bash verify/status.sh）
+#     2. verify/.server-host 文件（长期用，已在 .gitignore 里）
+# 两个都没有 ⇒ ④ 线上整节跳过，不报错、不算告警。
+if [ -z "$SSH_HOST" ] && [ -f "$SCRIPT_DIR/.server-host" ]; then
+  SSH_HOST="$(tr -d '\r\n' < "$SCRIPT_DIR/.server-host")"
+fi
 SSH_KEY="${SC_SSH_KEY:-$HOME/.ssh/workbuddy_sc_ed25519}"
 
 # 远程命令统一带超时。
@@ -158,7 +165,7 @@ fi
 R_JAR_TIME=""; R_STARTED=""; R_STATE=""; R_HEALTH=""; REACHABLE=0; R_ERR=""
 R_JAR_SHA=""; R_JAR_MTIME=0; R_START_EPOCH=0
 
-if [ "$OFFLINE" -eq 0 ]; then
+if [ "$OFFLINE" -eq 0 ] && [ -n "$SSH_HOST" ]; then
   REMOTE_OUT="$(
     "${TO[@]}" ssh -i "$SSH_KEY" -o ConnectTimeout=5 -o BatchMode=yes \
         -o StrictHostKeyChecking=no "$SSH_HOST" '
@@ -299,7 +306,7 @@ elif [ "$T_COMMIT" != "$GIT_HEAD" ]; then
 elif [ "${T_FAILED:-0}" != "0" ]; then
   WARN+=("最近一次回归有 ${T_FAILED} 个脚本失败")
 fi
-if [ "$OFFLINE" -eq 0 ]; then
+if [ "$OFFLINE" -eq 0 ] && [ -n "$SSH_HOST" ]; then
   [ "$REACHABLE" -eq 0 ] && WARN+=("${R_ERR}")
   # 比哈希，不比时间。时间戳会被同分钟构建、复制、时钟差骗过；哈希不会。
   if [ "$REACHABLE" -eq 1 ] && [ -n "$R_JAR_SHA" ] && [ -n "$JAR_SHA" ]; then
@@ -420,6 +427,8 @@ echo ""
 echo "④ 线上"
 if [ "$OFFLINE" -eq 1 ]; then
   echo "   ${D}已跳过（--offline）${N}"
+elif [ -z "$SSH_HOST" ]; then
+  echo "   ${D}已跳过（没配服务器地址：设 SC_SSH_HOST，或把 root@IP 写进 verify/.server-host）${N}"
 elif [ "$REACHABLE" -eq 0 ]; then
   echo "   ${R}${R_ERR}${N}"
 else

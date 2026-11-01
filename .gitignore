@@ -53,6 +53,10 @@ INTERVIEW.md
 ### status.sh 的测试结果存档（每次运行重写，不进版本库）###
 verify/.last-run.json
 
+### 服务器地址（仓库是公开的，IP 不进库）###
+### 本机自己建这个文件，内容一行：root@你的IP ###
+verify/.server-host
+
 ### 会话交接单（内容是"我此刻停在哪"，每次覆盖，只在本机有效）###
 ### 模板本身在 verify/SESSION-TEMPLATE.md，那个要进库 ###
 SESSION.md
