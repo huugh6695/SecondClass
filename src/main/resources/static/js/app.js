@@ -14,9 +14,9 @@
 import {
   api, getToken, setToken, clearToken, getDeviceToken, setDeviceToken,
   requestBlob, saveBlob
-} from './api.js?v=20261104';
+} from './api.js?v=20261107';
 // 标题区的点线背景动画（单独一个文件：canvas 绘制逻辑和页面渲染没关系，混进来只会更难读）
-import { mountPlexus, destroyPlexus } from './plexus.js?v=20261104';
+import { mountPlexus, destroyPlexus } from './plexus.js?v=20261107';
 
 /* ---------- 全局状态：整个前端就这一个"记事本" ---------- */
 
@@ -707,12 +707,22 @@ function viewLogin() {
                 <p class="muted login-hint">
                   预置账号初次登录密码为<strong>学号后 6 位</strong>；自助注册账号使用自己设置的密码。
                 </p>
-                <p class="muted login-hint">
-                  无需登录：
-                  <button class="lnk" id="login-see-faq" type="button">常见问题</button>
-                  <span aria-hidden="true">·</span>
-                  <button class="lnk" id="login-see-ann" type="button">查看公告</button>
-                </p>
+              </div>
+              <!-- 「无需登录也能看」两个入口：原来只是底部一行 12px 小字，
+                   在登录页里几乎看不见。改成两块并排的入口卡（标题 + 一句说明），
+                   尺寸和权重都抬起来，但仍压在主表单之下，不抢「登录」这个主动作。 -->
+              <div class="login-guest">
+                <p class="login-guest-title">无需登录也能查看</p>
+                <div class="login-guest-links">
+                  <button class="login-guest-item" id="login-see-faq" type="button">
+                    <strong>常见问题</strong>
+                    <small>学时规则与常见疑问</small>
+                  </button>
+                  <button class="login-guest-item" id="login-see-ann" type="button">
+                    <strong>查看公告</strong>
+                    <small>服务通知与更新</small>
+                  </button>
+                </div>
               </div>
             `}
           </div>
