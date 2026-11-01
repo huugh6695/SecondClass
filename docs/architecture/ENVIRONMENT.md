@@ -38,8 +38,39 @@
 - 执行策略拦住 `.ps1` 时：`powershell -ExecutionPolicy Bypass -File .\verify\run.ps1 status`
 - 换机器只需设一次：`$env:BASH_EXE = 'C:\path\to\bash.exe'`
 
-> ⚠️ 本机 PowerShell **不是**可靠的验证通道（这个沙箱里它启动不了外部进程，
-> 连 `bash -c echo` 都返回空）。验证脚本一律用 Git Bash 跑；PowerShell 只用于确认包装器能调通。
+> 🔴 **2026-10-31 写的旧结论作废**：原文说「本机 PowerShell 启动不了外部进程，
+> 连 `bash -c echo` 都返回空」。这句话把**现象**当成了**原因**。2026-11-01 实测追到底，
+> 真因有三个，`run.ps1` 现在前两个都处理了。
+
+**① `.ps1` 存成了 UTF-8 无 BOM —— 这是「原样跑完全不工作」的主因**
+
+Windows PowerShell 5.1 读**没有 BOM** 的 `.ps1` 时按系统 ANSI 代码页解码（中文机器 = GBK），
+于是中文全变乱码，某一行字符串的收尾引号被汉字的后半个字节"吃掉" ⇒ **整个脚本解析失败**。
+
+最坑的是失败表现：解析失败连一行都不执行，所以 `$LASTEXITCODE` 保持原值 `0`，
+调用方看到的是 **「退出码 0 + 零输出」的假成功**。
+
+- ⇒ 仓库里所有 `*.ps1` **必须保存为 UTF-8 with BOM**（当前只有 `verify/run.ps1` 一个）
+- 改完自检：`head -c 3 verify/run.ps1 | od -An -tx1` 必须是 `ef bb bf`
+- 症状识别：`& .\verify\run.ps1 status` 没有任何输出、`$LASTEXITCODE` 是 0 = 先怀疑编码
+
+**② `PATHEXT` 缺 `.EXE`（本机实测值就是 `[.CPL]`，只有一个）**
+
+此时 PowerShell 把 `.exe` 当"文档"打开，同样表现为零输出 + 退出码 0（还是假成功）。
+`run.ps1` 开头会把 `.EXE` 补回 `$env:PATHEXT`，并用 `bash -c 'echo __RUNPS_OK__'` 探活；
+探活不过直接 `exit 2` 并打印当前 `PATHEXT`。
+
+永久修法（需管理员）：系统环境变量里把 `PATHEXT` 恢复成
+`.COM;.EXE;.BAT;.CMD;.VBS;.VBE;.JS;.JSE;.WSF;.WSH;.MSC`。
+
+**③ 别给 `run.ps1` 的输出接管道**
+
+`.\verify\run.ps1 status | Out-String` 有两个副作用：中文按 GBK 解码成乱码；
+`exit N` 传不出来（`$LASTEXITCODE` 变 0）。**直接运行则两者都正常**。
+`[Console]::OutputEncoding = UTF8` 实测对它**无效**（赋值成功但输出照样乱码）。
+
+> 结论：**验证脚本优先用 Git Bash 跑**（最稳）；要在 PowerShell 里跑就走 `run.ps1`，
+> 且**别接管道**。cmd 下直接调 `bash.exe` 也行。
 
 ## 二、🔴 重启后必检两样依赖
 - **MySQL**：服务名 **`MySQL80`**。`net start MySQL80` 报"拒绝访问" = 服务存在、只是要管理员；`sc.exe`/`reg.exe`/`cmd.exe` 都被安全策略禁 ⇒ **我启不了服务，只能让用户开**。

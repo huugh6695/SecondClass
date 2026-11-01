@@ -106,6 +106,11 @@
   （boundary mark / ref 名 / 完整哈希），会输出成 `>- (HEAD -> main) 604b33a…:%M`。
   要自定义日期格式，用 `--date=format:'%m-%d %H:%M'`，或者干脆
   `date -d "@$(git log -1 --format=%ct)" '+%m-%d %H:%M'`。
+- 🔴 **PowerShell 脚本必须存成 UTF-8 with BOM**：无 BOM 时 PowerShell 5.1 按 GBK 解码，
+  中文乱码后会把字符串的收尾引号吃掉 ⇒ **整个脚本解析失败**，而且**一行都不执行**
+  ⇒ `$LASTEXITCODE` 保持 0 ⇒ 表现为「零输出 + 退出码 0」的假成功。
+  同理 `PATHEXT` 缺 `.EXE` 时 `.exe` 被当文档打开，症状一模一样。
+  ⇒ 见到「零输出 + 0」先查这两样，别当成跑通了；细节见 `ENVIRONMENT.md §1.1`。
 
 ## 数据枚举
 
