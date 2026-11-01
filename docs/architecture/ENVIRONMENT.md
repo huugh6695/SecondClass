@@ -64,8 +64,10 @@ Windows PowerShell 5.1 读**没有 BOM** 的 `.ps1` 时按系统 ANSI 代码页�
 > 教训两条：
 > 1. **报运行态结论必须同时报 commit 号**，否则两份结论没法对齐（`status.sh --json` 里有，
 >    人读的报告也要带上）。
-> 2. **`verify/` 下的脚本也算"要验证的代码"**：改完至少跑一次 `bash verify/status.sh --offline`
->    和 `.\verify\run.ps1 status --offline`，别只看 Git Bash 那一路。
+> 2. **`verify/` 下的脚本也算"要验证的代码"**：改完至少跑一次 `bash verify/selftest.sh`
+>    （2 秒，查 shell 语法 / `.ps1` 有没有 BOM / 指纹 / `status.sh` 输出 / 交接单状态），
+>    再跑一次 `bash verify/status.sh --offline` 和 `.\verify\run.ps1 status --offline`，
+>    别只看 Git Bash 那一路。`run-regression.sh` 已把 `selftest.sh` 当「第零步」自动执行。
 
 - ⇒ 仓库里所有 `*.ps1` **必须保存为 UTF-8 with BOM**（当前只有 `verify/run.ps1` 一个）
 - 改完自检：`head -c 3 verify/run.ps1 | od -An -tx1` 必须是 `ef bb bf`

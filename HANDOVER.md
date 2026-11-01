@@ -56,7 +56,7 @@ D:\basic codes\second-classroom\        ← 项目根目录（⚠️ 路径含�
 | 路径 | 说明 |
 |---|---|
 | `requests.http` | **手工测试集**（分 A/B/C/D 四组）。IDEA 里可逐条点着跑 |
-| `verify/` | **验收脚本与状态工具**：`status.sh`（查运行态六个位置）、`run-regression.sh`（跑全套验收）、`session.sh`（会话交接单）、`lib.py` 公共库、`verify-*.py` 各模块验收。已纳入 git，不会丢 |
+| `verify/` | **验收脚本与状态工具**：`status.sh`（查运行态六个位置）、`selftest.sh`（查工具本身还能不能用）、`run-regression.sh`（跑全套验收，开跑前自动调 `selftest.sh`）、`session.sh`（会话交接单）、`lib.py` 公共库、`verify-*.py` 各模块验收。已纳入 git，不会丢 |
 | `docs/architecture/` | **工程与业务规则**：`CONVENTIONS.md`（分层/事务/Redis/命令行坑）、`MODULES.md`（业务规则）、`ENVIRONMENT.md`（环境与上线硬约束）、`PROCESS.md`（协作纪律）。**动代码前必读** |
 | `target/` | Maven 构建产物。🔴 **别往这里放任何需要长期保存的东西** —— `mvn clean` 会整个删掉 |
 | `logs/` | 本机运行日志 |
@@ -496,4 +496,5 @@ ssh root@<你的服务器IP> 'chown scapp:scapp /srv/second-classroom/*.jar && s
 | 手工测试集 | `requests.http` | 可点击执行的请求（分 A/B/C/D 四组） |
 | 自动化验收 | `verify/verify-*.py` + `verify/run-regression.sh` | 接口黑盒验收 |
 | 运行态自检 | `verify/status.sh` | 代码 / 构建 / 测试 / 线上 / 数据库 / 交接单 |
+| 工具自检 | `verify/selftest.sh` | shell 语法 / `.ps1` 的 BOM / 指纹 / status 输出 / 交接单状态 |
 | 会话交接 | `SESSION.md`（本机，不进 Git） | 上一轮停在哪、下一步、为什么没做 |

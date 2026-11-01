@@ -67,6 +67,8 @@ git commit -m "type(scope): 中文描述"        # 按主题拆，别一个提�
 
 改了表结构：同步 `schema.sql` + 新增 `deploy/migrate-*.sql`，并在 `t_schema_version` 记一行。
 只改前端：至少跑 `bash verify/run-regression.sh 8117 verify-frontend.py`。
+**改了 `verify/` 下的任何脚本（`.sh` / `.ps1`）**：先跑 `bash verify/selftest.sh`（2 秒）。
+`run-regression.sh` 会自动把这一步当「第零步」执行，没过就中止 —— 工具坏了别往下跑。
 
 ### 测试和提交谁先谁后
 
