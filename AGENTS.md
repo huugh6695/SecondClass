@@ -31,10 +31,12 @@ PowerShell 里调不通时，直接指定解释器：`& 'D:\Git\bin\bash.exe' ve
 （本机 Git 在 `D:\Git`，不在 `C:\Program Files`；详见 `docs/architecture/ENVIRONMENT.md §1.1`）。
 
 > ⚠️ 看到「**零输出 + 退出码 0**」不要当成跑通了，本机有两个假成功陷阱：
-> ① `*.ps1` 没存成 **UTF-8 with BOM** ⇒ PowerShell 5.1 按 GBK 解码 ⇒ 中文乱码 ⇒ 整个脚本
-> **解析失败**（一行都不执行，`$LASTEXITCODE` 保持 0）；改过 `run.ps1` 后确认前 3 字节是 `EF BB BF`。
+> ① `*.ps1` 没存成 **UTF-8 with BOM**，且**字符串里有中文**（注释里有中文不致命）
+> ⇒ PowerShell 5.1 按 GBK 解码 ⇒ 引号被吃掉 ⇒ 整个脚本**解析失败**（一行都不执行，
+> `$LASTEXITCODE` 保持 0）；改过 `run.ps1` 后确认前 3 字节是 `EF BB BF`。
 > ② `PATHEXT` 缺 `.EXE`（本机实测只有 `.CPL`）⇒ `.exe` 被当文档打开，什么都不执行。
 > `run.ps1` 已内置 `PATHEXT` 自救 + 探活。另外**别给它的输出接管道**（中文乱码、退出码被吞成 0）。
+> ⚠️ 报「跑通 / 跑不通」时**必须带 commit 号**，否则两份结论没法对齐（11-01 就吃过这个亏）。
 
 `status.sh` 管**机器能验的运行态**，`SESSION.md` 管**人做出的判断**。两者互补、互不替代：
 `status.sh` 不会告诉你「为什么先不做」，`SESSION.md` 也不会告诉你测试过没过。
