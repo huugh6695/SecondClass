@@ -3051,3 +3051,300 @@ select.input {
   .sms-code-row .btn { flex: 1 1 100%; }
   .auth-actions .btn { flex: 1 1 100%; }
 }
+
+/* =============================================================
+   2026 第四版：液态玻璃视觉层 + 标题点线背景 + 品牌扫光
+   -------------------------------------------------------------
+   这一节是**纯叠加层**：只覆盖观感，不改任何类名、不动 JS 结构。
+   想回退：把本节整段删掉即可，前面的样式依然完整可用。
+
+   三条设计原则
+     ① 玻璃必须有东西可以"透"：所以先给 body 铺三团彩色光斑；
+     ② 磨砂（backdrop-filter）只给数量少的"壳"（顶栏/卡片/菜单/底栏），
+        列表里动辄十几张的条目卡只做半透明 —— 否则手机滚动掉帧；
+     ③ 圆角抬到大一档、阴影压得更柔更低，整体才"轻"。
+   ============================================================= */
+
+:root {
+  --glass: rgba(255, 255, 255, .58);
+  --glass-strong: rgba(255, 255, 255, .78);
+  --glass-list: rgba(255, 255, 255, .74);
+  --glass-border: rgba(255, 255, 255, .68);
+  --shadow-glass: 0 12px 40px rgba(23, 43, 77, .10), inset 0 1px 0 rgba(255, 255, 255, .55);
+  --shadow-panel: 0 8px 26px rgba(23, 43, 77, .07), inset 0 1px 0 rgba(255, 255, 255, .60);
+  --shadow-glass-hover: 0 16px 44px rgba(23, 43, 77, .14), inset 0 1px 0 rgba(255, 255, 255, .62);
+  --radius: 20px;
+}
+
+/* 关键①：铺一层"光影底色"。磨砂卡片透出来的就是这几团颜色，
+   没有它们，玻璃只会是一片灰白。 */
+body {
+  background:
+    radial-gradient(46rem 46rem at 6% -12%, rgba(36, 99, 223, .16), transparent 62%),
+    radial-gradient(40rem 40rem at 108% 8%, rgba(19, 164, 143, .13), transparent 58%),
+    radial-gradient(44rem 44rem at 50% 118%, rgba(122, 92, 250, .11), transparent 62%),
+    linear-gradient(180deg, #edf2fb, #f6f8fc);
+}
+
+/* 关键②：壳级元素上磨砂 */
+.topbar {
+  background: rgba(255, 255, 255, .55);
+  border-bottom: 1px solid rgba(255, 255, 255, .55);
+  box-shadow: 0 1px 0 rgba(255, 255, 255, .4), 0 8px 30px rgba(23, 43, 77, .05);
+  -webkit-backdrop-filter: blur(24px) saturate(180%);
+  backdrop-filter: blur(24px) saturate(180%);
+}
+
+.card {
+  background: var(--glass);
+  border-color: var(--glass-border);
+  box-shadow: var(--shadow-glass);
+  -webkit-backdrop-filter: blur(22px) saturate(170%);
+  backdrop-filter: blur(22px) saturate(170%);
+}
+
+.filters {
+  background: var(--glass);
+  border-color: var(--glass-border);
+  border-radius: 16px;
+  box-shadow: var(--shadow-glass);
+  -webkit-backdrop-filter: blur(22px) saturate(170%);
+  backdrop-filter: blur(22px) saturate(170%);
+}
+
+.more-menu {
+  background: var(--glass-strong);
+  border-color: rgba(255, 255, 255, .8);
+  -webkit-backdrop-filter: blur(26px) saturate(180%);
+  backdrop-filter: blur(26px) saturate(180%);
+}
+
+.mobile-action-dock {
+  background: rgba(255, 255, 255, .62);
+  border-color: rgba(255, 255, 255, .7);
+  -webkit-backdrop-filter: blur(24px) saturate(180%);
+  backdrop-filter: blur(24px) saturate(180%);
+}
+
+.home-info-card {
+  background: var(--glass);
+  border-color: var(--glass-border);
+  border-radius: 18px;
+  box-shadow: var(--shadow-glass);
+  -webkit-backdrop-filter: blur(20px) saturate(170%);
+  backdrop-filter: blur(20px) saturate(170%);
+}
+
+/* 关键③：列表条目卡只半透明、不磨砂（性能取舍，见文件头第 ② 条） */
+.order-card,
+.notif-card,
+.faq-item,
+.log-row {
+  background: var(--glass-list);
+  border-color: var(--glass-border);
+  box-shadow: var(--shadow-panel);
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+  transition: transform .2s ease, box-shadow .2s ease, border-color .2s ease;
+}
+
+.order-card:hover,
+.notif-card:hover,
+.faq-item:hover {
+  border-color: rgba(255, 255, 255, .9);
+  box-shadow: var(--shadow-glass-hover);
+  transform: translateY(-2px);
+}
+
+/* 控件：输入框"回实"、次要按钮玻璃化、主按钮保持品牌实色 */
+.input {
+  border-color: rgba(23, 43, 77, .12);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, .95);
+  box-shadow: inset 0 1px 2px rgba(23, 43, 77, .04);
+}
+
+.input:focus {
+  border-color: var(--primary);
+  background: #fff;
+  box-shadow: var(--focus-ring);
+}
+
+.btn {
+  border-color: rgba(255, 255, 255, .75);
+  border-radius: 12px;
+  background: var(--glass-strong);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .6), 0 3px 10px rgba(23, 43, 77, .06);
+}
+
+.btn:hover:not(:disabled) {
+  border-color: rgba(255, 255, 255, .95);
+  background: #fff;
+  color: var(--primary-dark);
+}
+
+.btn-primary {
+  border-color: transparent;
+  background: linear-gradient(135deg, #2d70ec, #1f59d3);
+  color: #fff;
+  box-shadow: 0 8px 18px rgba(36, 99, 223, .25), inset 0 1px 0 rgba(255, 255, 255, .25);
+}
+
+.btn-primary:hover:not(:disabled) {
+  border-color: transparent;
+  background: linear-gradient(135deg, #2868df, #1749b5);
+  color: #fff;
+  transform: translateY(-1px);
+}
+
+/* 状态胶囊 / 徽章：保留各自的色相，只把"实色块"换成半透明玻璃块。
+   ⚠️ 这里必须逐个写 .badge-xxx 覆盖，不能图省事写 `.badge { background: transparent }`
+   —— 那样会把徽章的颜色全部抹掉（同权重、在后面，直接盖掉上面 1886 行那批定义）。 */
+.badge,
+.adm-state {
+  border-radius: 999px;
+}
+
+.badge-pending    { background: rgba(245, 178, 47, .14); border-color: rgba(217, 154, 26, .32); color: #96620c; }
+.badge-processing { background: rgba(45, 112, 236, .12); border-color: rgba(45, 112, 236, .30); color: #2455ad; }
+.badge-replied    { background: rgba(35, 174, 126, .13); border-color: rgba(35, 174, 126, .30); color: #177453; }
+.badge-closed     { background: rgba(120, 134, 152, .13); border-color: rgba(120, 134, 152, .28); color: #5d6b80; }
+.badge-merged     { background: rgba(122, 92, 250, .12); border-color: rgba(122, 92, 250, .30); color: #5d3fa5; }
+
+.adm-state.is-on  { background: rgba(35, 174, 126, .13); border-color: rgba(35, 174, 126, .30); color: #177453; }
+.adm-state.is-off { background: rgba(120, 134, 152, .13); border-color: rgba(120, 134, 152, .28); color: #5d6b80; }
+
+.status-tab.active {
+  border-color: rgba(255, 255, 255, .8);
+  background: var(--glass-strong);
+  box-shadow: 0 4px 14px rgba(22, 48, 88, .09), inset 0 1px 0 rgba(255, 255, 255, .7);
+  -webkit-backdrop-filter: blur(14px);
+  backdrop-filter: blur(14px);
+}
+
+.empty-state {
+  border: 1px dashed rgba(255, 255, 255, .85);
+  background: rgba(255, 255, 255, .45);
+}
+
+/* 登录页：左侧深蓝故事面板保持不动，只把右侧表单壳玻璃化 */
+.login-shell {
+  border-color: rgba(255, 255, 255, .85);
+  border-radius: 30px;
+}
+
+.login-panel {
+  background: rgba(255, 255, 255, .14);
+}
+
+.login-panel .login-card {
+  background: rgba(255, 255, 255, .74);
+  border-color: rgba(255, 255, 255, .88);
+  box-shadow: 0 18px 50px rgba(23, 43, 77, .14), inset 0 1px 0 rgba(255, 255, 255, .7);
+}
+
+.login-panel .input {
+  background: rgba(255, 255, 255, .95);
+}
+
+/* 不支持磨砂的老浏览器：退回高不透明白，保证文字永远可读 */
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .card,
+  .filters,
+  .home-info-card {
+    background: rgba(255, 255, 255, .94);
+  }
+  .topbar {
+    background: rgba(255, 255, 255, .96);
+  }
+}
+
+/* ---------- 标题区：点线背景（我的工单） ----------
+   canvas 绝对定位铺满标题块，z-index 0；标题文字在 .page-heading 里
+   自然叠在上层（position: relative + z-index 1），视觉上就是"线条从字底下穿过"。 */
+.page-heading {
+  position: relative;
+  z-index: 0;
+}
+
+.page-heading > * {
+  position: relative;
+  z-index: 1;
+}
+
+#plexus-canvas {
+  position: absolute;
+  top: -8px;
+  left: -16px;
+  right: auto;
+  /* ⚠ 高度必须显式写，不能用 top+bottom 撑：
+     canvas 和 <img> 一样自带固有宽高比（默认 300×150 = 2:1），
+     只给 width 而不给 height 时，浏览器会按"宽度 × 0.5"算高度 ——
+     440 宽的画布就变成 220 高，比标题块高一倍，网往下糊到副标题上。
+     这里 height 直接对齐标题块（100%）再上下各多 8px。 */
+  height: calc(100% + 16px);
+  /* 宽度收在标题这一侧：
+     标题块（.page-heading）是 flex:1，横跨整行，
+     如果画布也铺满整行，点数一稀释，线就全跑到右边空白处去了
+     —— 看着像"标题旁边有一团网"，而不是"线从字底下穿过"。
+     注意：这里的宽度是画布尺寸的唯一来源，js/plexus.js 只按这个框
+     分配像素、不会再用内联样式覆盖它，所以调大小改这里就行。 */
+  width: min(460px, 62%);
+  z-index: 0;
+  display: block;
+  pointer-events: none;
+  /* 边缘柔化：浓的一团压在标题文字上（横向 21% ≈ "我的工单"四个字的位置），
+     往右逐级淡出，线别在画布边界被硬切掉 */
+  -webkit-mask-image: radial-gradient(58% 100% at 20% 54%, #000 30%, rgba(0, 0, 0, .45) 68%, transparent 100%);
+  mask-image: radial-gradient(58% 100% at 20% 54%, #000 30%, rgba(0, 0, 0, .45) 68%, transparent 100%);
+}
+
+/* ---------- 品牌标题扫光 ----------
+   做法：底层是原来的深色字（始终存在），顶层把同一段文字复制一遍，
+   只让"白色高光带"透出来。这样光带经过时字只是被提亮，
+   不会像"整段文字做渐变"那样在峰值变纯白、在白底上等于消失。
+
+   关键帧按 background-size: 240% 反推：
+   p=100% 时高光带在字左侧外面，p=0% 在右侧外面，
+   中间那段才是真的扫在字面上 —— 走满这个区间，
+   5 秒一轮里约 1.4 秒肉眼可见，不会一闪而过。
+   （站点标题只有 4 个字，光带宽度是按百分比算的，会跟着字宽自动缩放。） */
+.brand-title {
+  position: relative;
+  display: inline-block;
+}
+
+.brand-title::after {
+  content: attr(data-text);
+  position: absolute;
+  inset: 0;
+  color: transparent;
+  -webkit-text-fill-color: transparent;
+  background-image: linear-gradient(
+    100deg,
+    rgba(255, 255, 255, 0) 41%,
+    rgba(255, 255, 255, .40) 46%,
+    rgba(255, 255, 255, .88) 50%,
+    rgba(255, 255, 255, .40) 54%,
+    rgba(255, 255, 255, 0) 59%
+  );
+  background-repeat: no-repeat;
+  background-size: 240% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  pointer-events: none;
+  animation: brand-sheen 5s cubic-bezier(.4, .05, .35, 1) infinite;
+}
+
+@keyframes brand-sheen {
+  0%, 10%   { background-position: 100% 0; }
+  52%, 100% { background-position: 0% 0; }
+}
+
+/* 尊重「减少动态效果」：动画全关，扫光层直接不显示，标题回到纯深色 */
+@media (prefers-reduced-motion: reduce) {
+  .brand-title::after {
+    animation: none;
+    opacity: 0;
+  }
+}
