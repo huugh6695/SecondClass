@@ -249,6 +249,11 @@ Windows PowerShell 5.1 读**没有 BOM** 的 `.ps1` 时按系统 ANSI 代码页�
 
 ## 八、🔴 上线部署的三个硬约束（⑨，会静默出错）
 
+> 🔴 **仓库是公开的（GitHub）**：服务器 IP、真实账号密码、私钥都不进库。
+> 服务器地址写在本机 `verify/.server-host`（已 gitignore，内容就一行 `root@IP`），
+> `status.sh` 会自动读它；文档里一律写 `<你的服务器IP>` 占位。
+> 2026-11-01 做过一次全库脱敏（含重写历史），别再写回去。
+
 ① **Nginx 必须 `client_max_body_size 10m`**。默认只有 1MB，而应用允许单文件 5MB、
 整个 multipart 6MB（`spring.servlet.multipart`）⇒ 传稍大的图会**被 Nginx 直接 413 挡掉、
 请求到不了 Java**，应用日志一片空白 ⇒ 极易误判成"上传接口写错了"。
