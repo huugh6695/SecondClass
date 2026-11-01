@@ -4,13 +4,8 @@
 
 **在线演示**：部署在阿里云 ECS 上，地址不写进仓库（真实 IP 放在本机的 `verify/.server-host`）
 
-| 角色 | 演示账号 | 密码 |
-|---|---|---|
-| 学生 | 2023001001 | 123456 |
-| 干事（学部） | 2023002001 | 123456 |
-| 管理员 | 2023003001 | 123456 |
-
-> 演示库为脱敏测试数据；服务器为个人学生机，若打不开请见下方「已知不足」。
+> 系统分学生 / 干事 / 管理员三类角色，权限与可用功能见下方「三类角色能做什么」。
+> 演示账号不在仓库里公开；本地跑起来后用 `deploy/seed.sql` 预置的管理员账号登录。
 
 ## 界面
 
@@ -47,10 +42,10 @@
 ## 技术栈
 
 - **后端**：Spring Boot 4.1.1 / Java 17 / Maven
-- **数据**：MySQL 8（**13 张表**）、Redis
+- **数据**：MySQL 8（14 张表）、Redis
 - **鉴权**：JWT（HS512）+ 拦截器；登出后 Token 进 Redis 黑名单
 - **前端**：原生 HTML/CSS/JS（`app.js` 约 200 KB，无前端框架）
-- **规模**：105 个 Java 文件 / 8,831 行；**18 个控制器 / 52 个接口方法**；16 个服务类
+- **规模**：119 个 Java 文件 / 约 1.3 万行；**18 个控制器 / 59 个接口方法**；25 个服务类
 - **部署**：阿里云 + nginx + systemd；带备份脚本与部署手册（`deploy/`）
 
 ## 我做的几个判断，以及为什么
@@ -77,7 +72,7 @@
 
 ## 接口与数据
 
-- 表结构：`schema.sql`（13 张表，含工单、消息、附件、常见问题、公告、合并关系、状态日志、操作日志、快捷回复、通知日志、敏感词）
+- 表结构：`schema.sql`（14 张表，含工单、消息、附件、常见问题、公告、合并关系、状态日志、操作日志、快捷回复、通知日志、敏感词）
 - 接口自测：`requests.http`（可直接在 IDEA / VS Code REST Client 里跑）
 - 健康检查：`GET /health` 返回 DB / Redis 状态，任一挂了整体报 DOWN + 503
 
@@ -101,7 +96,7 @@ copy config\application-local.yml.example config\application-local.yml
 .\mvnw.cmd spring-boot:run
 ```
 
-浏览器打开 <http://localhost:8080>，用上面的演示账号登录。
+浏览器打开 <http://localhost:8080>，用 `deploy/seed.sql` 预置的管理员账号登录（初始密码见该文件注释，上线后务必改掉）。
 
 > 配置读取顺序：`application.yml`（占位符 + `optional:file:./config/application-local.yml`）
 > → 本地文件提供真实值 → 生产用 `--spring.profiles.active=prod` 走环境变量。
@@ -137,7 +132,7 @@ java -jar second-classroom-0.0.1-SNAPSHOT.jar --spring.profiles.active=prod
 ```
 src/main/java/com/secondclassroom/
 ├── controller/   18 个控制器（学生端 / 干事端 / 管理端 / 认证 / 文件 / 健康检查）
-├── service/      16 个服务类（业务、统计、导出、通知派发、敏感词、重复检测）
+├── service/      25 个服务类（业务、统计、导出、通知派发、敏感词、重复检测）
 ├── interceptor/  JWT 鉴权拦截器
 ├── common/       统一返回、异常处理、Token 黑名单
 └── util/         JWT 工具
@@ -145,7 +140,7 @@ src/main/resources/
 ├── static/       前端（index.html / app.js / api.js / app.css）
 ├── application.yml          开发配置（密钥用占位符）
 └── application-prod.yml     生产配置（全部走环境变量）
-schema.sql        建表语句（13 张表）
+schema.sql        建表语句（14 张表）
 requests.http     接口自测集合
 deploy/           部署手册、nginx 配置、systemd 服务、备份脚本
 ```
