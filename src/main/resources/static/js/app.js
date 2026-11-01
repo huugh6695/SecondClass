@@ -14,7 +14,9 @@
 import {
   api, getToken, setToken, clearToken, getDeviceToken, setDeviceToken,
   requestBlob, saveBlob
-} from './api.js?v=20261031';
+} from './api.js?v=20261104';
+// 标题区的点线背景动画（单独一个文件：canvas 绘制逻辑和页面渲染没关系，混进来只会更难读）
+import { mountPlexus, destroyPlexus } from './plexus.js?v=20261104';
 
 /* ---------- 全局状态：整个前端就这一个"记事本" ---------- */
 
@@ -394,7 +396,7 @@ function brandLockupHtml() {
         </svg>
       </span>
       <span class="brand-copy">
-        <span class="brand-title">第二课堂</span>
+        <span class="brand-title" data-text="第二课堂">第二课堂</span>
         <span class="brand-subtitle">学时答疑服务台</span>
       </span>
     </span>`;
@@ -1109,6 +1111,9 @@ function viewMyOrders() {
   bindTopbar();
   bindPwdAlert();
   bindListHead();
+  // 标题区的点线背景：必须在 innerHTML 写完之后调用，否则找不到 canvas。
+  // 只挂「我的工单」这一页 —— 管理后台那种表格页挂动画会显得浮。
+  mountPlexus();
 
   // 监听器绑在**容器**上，而不是每一张卡片上。
   // 好处：换页/改筛选时只替换容器里的 HTML，监听器还在，不用重新绑一遍。
@@ -1510,6 +1515,10 @@ function listHeadHtml() {
   return `
     <div class="list-head">
       <div class="page-heading">
+        <!-- 点线背景画在这块 canvas 上（绝对定位铺满标题块、z-index 0），
+             标题文字 z-index 1 叠在上层 —— 所以线条看起来是从字底下穿过去的。
+             动画逻辑在 js/plexus.js，这里只负责留个位置。 -->
+        <canvas id="plexus-canvas" aria-hidden="true"></canvas>
         <p class="eyebrow">${eyebrow}</p>
         <h2 class="list-title">${esc(listTitle())}</h2>
         <p class="page-sub">${subtitle}</p>
@@ -5345,6 +5354,12 @@ async function onLogPagerClick(e) {
 /* ---------- 十二、路由：决定显示哪个页面 ---------- */
 
 function render() {
+  // 每次切页前先把上一页的点线动画停掉：
+  // 页面内容会被整体替换，旧 canvas 从 DOM 上脱落后，它那圈
+  // requestAnimationFrame 还会一直跑（画在一块没人看的画布上），
+  // 切几次页面就多几圈 —— 这是最隐蔽的卡顿来源。
+  destroyPlexus();
+
   // 没登录 → 只有**白名单里这两个**能进（用户拍板：公告和 FAQ 不登录也能看），
   // 其余一律回登录页。
   //
