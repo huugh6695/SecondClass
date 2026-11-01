@@ -17,11 +17,18 @@
 ## 二、开工前
 
 ```bash
+# Git Bash / WSL
 bash verify/install-hooks.sh   # 只需一次：装提交前检查（换机器 / 重新 clone 后重跑）
 bash verify/status.sh          # 运行态：代码 / 构建 / 测试 / 线上 / 数据库 / 交接单
 bash verify/session.sh         # 判断：上一轮停在哪、下一步是什么
-git status                     # 有未提交改动先确认归属，别覆盖别人的活
+
+# PowerShell（Windows 上 bash 通常不在 PATH，用这个，效果一样）
+.\verify\run.ps1 status
+.\verify\run.ps1 session
 ```
+
+PowerShell 里调不通时，直接指定解释器：`& 'D:\Git\bin\bash.exe' verify/status.sh`
+（本机 Git 在 `D:\Git`，不在 `C:\Program Files`；详见 `docs/architecture/ENVIRONMENT.md §1.1`）。
 
 `status.sh` 管**机器能验的运行态**，`SESSION.md` 管**人做出的判断**。两者互补、互不替代：
 `status.sh` 不会告诉你「为什么先不做」，`SESSION.md` 也不会告诉你测试过没过。
@@ -45,12 +52,25 @@ git status                     # 有未提交改动先确认归属，别覆盖�
 ## 四、改完
 
 ```bash
-bash verify/run-regression.sh 8117   # 先用临时实例，别占用户的 8080
-git commit -m "type(scope): 中文描述"  # 按主题拆，别一个提交塞 40 项
+bash verify/run-regression.sh 8117         # 先用临时实例，别占用户的 8080
+.\verify\run.ps1 run-regression 8117       # PowerShell 写法
+git commit -m "type(scope): 中文描述"        # 按主题拆，别一个提交塞 40 项
 ```
 
 改了表结构：同步 `schema.sql` + 新增 `deploy/migrate-*.sql`，并在 `t_schema_version` 记一行。
 只改前端：至少跑 `bash verify/run-regression.sh 8117 verify-frontend.py`。
+
+### 测试和提交谁先谁后
+
+**都可以，不用改习惯。** 因为回归记录的是「运行源码指纹」，不是 commit 号：
+
+- 指纹 = `src/main/**`、`pom.xml`、`schema.sql`、`verify/*.py` 这几类文件的**内容**哈希
+  （算法只有一份，在 `verify/source-fingerprint.sh`）
+- `git commit` 只改 HEAD，**不改文件内容** ⇒ 提交前后指纹相同 ⇒ 结果依然有效
+- 只有改了上面那些文件，旧结果才作废；改 `docs/`、`AGENTS.md`、`HANDOVER.md` **不会**
+
+所以在 `status.sh` 里看到「对应 commit 与当前 HEAD 不一致」但「源码指纹一致」时，
+**那份结果仍然算数**——不用因为多提交了几个文档就重跑一遍全套。
 
 ## 五、必须问人，不许自己决定
 

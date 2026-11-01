@@ -20,6 +20,27 @@
 - 项目源码 `D:\basic codes\second-classroom`（路径含空格，**引用必须加引号**）。
 - Python `C:/Users/joya/.workbuddy/binaries/python/versions/3.13.12/python.exe`。
 
+### 1.1 怎么调 bash（PowerShell 里 `bash` 不在 PATH）
+
+**Git 装在本机的 `D:\Git`**，不是默认的 `C:\Program Files\Git`，所以 `bash` 没进 PATH。
+按环境选一种，效果完全一样：
+
+| 环境 | 命令 |
+|---|---|
+| Git Bash / WSL | `bash verify/status.sh` |
+| PowerShell（本项目自带包装器） | `.\verify\run.ps1 status --offline` |
+| PowerShell（不用包装器） | `& 'D:\Git\bin\bash.exe' verify\status.sh` |
+| cmd | `"D:\Git\bin\bash.exe" verify\status.sh` |
+
+`run.ps1` 找 bash 的顺序：`$env:BASH_EXE` → `D:\Git\bin\` → `C:\Program Files\Git\bin\` →
+`C:\Program Files (x86)\Git\bin\` → `%LOCALAPPDATA%\Programs\Git\bin\` → `Get-Command bash`。
+
+- 执行策略拦住 `.ps1` 时：`powershell -ExecutionPolicy Bypass -File .\verify\run.ps1 status`
+- 换机器只需设一次：`$env:BASH_EXE = 'C:\path\to\bash.exe'`
+
+> ⚠️ 本机 PowerShell **不是**可靠的验证通道（这个沙箱里它启动不了外部进程，
+> 连 `bash -c echo` 都返回空）。验证脚本一律用 Git Bash 跑；PowerShell 只用于确认包装器能调通。
+
 ## 二、🔴 重启后必检两样依赖
 - **MySQL**：服务名 **`MySQL80`**。`net start MySQL80` 报"拒绝访问" = 服务存在、只是要管理员；`sc.exe`/`reg.exe`/`cmd.exe` 都被安全策略禁 ⇒ **我启不了服务，只能让用户开**。
 - **Redis**：✅ **2026-09-29 已装成 Windows 服务**，服务名 `redis`（小写）、`StartMode=Auto`、

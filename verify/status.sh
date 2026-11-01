@@ -99,6 +99,13 @@ HEAD_TS="$(git log -1 --format=%ct 2>/dev/null || echo 0)"
 #    精确到分钟的时间显示，一律从 epoch 转。
 HEAD_TIME="$(date -d "@${HEAD_TS:-0}" '+%m-%d %H:%M' 2>/dev/null || true)"
 [ "${HEAD_TS:-0}" -le 0 ] && HEAD_TIME=""
+
+# 只认「动过运行相关源码」的那次提交。
+#   纯文档提交（docs/、README、AGENTS.md）不会改变 jar 的内容，
+#   拿它当判据会导致「每写一句文档就说 jar 过期了」——喊多了就没人看了。
+SRC_COMMIT_TS="$(git log -1 --format=%ct -- src/main pom.xml 2>/dev/null || echo 0)"
+SRC_COMMIT_TIME="$(date -d "@${SRC_COMMIT_TS:-0}" '+%m-%d %H:%M' 2>/dev/null || true)"
+[ "${SRC_COMMIT_TS:-0}" -le 0 ] && SRC_COMMIT_TIME=""
 if [ -n "${JAR_PATH:-}" ] && [ -f "$JAR_PATH" ]; then
   JAR_TIME="$(date -r "$JAR_PATH" '+%Y-%m-%d %H:%M' 2>/dev/null || echo '?')"
   JAR_MTIME="$(date -r "$JAR_PATH" '+%s' 2>/dev/null || echo 0)"
@@ -111,23 +118,19 @@ if [ -n "${JAR_PATH:-}" ] && [ -f "$JAR_PATH" ]; then
   )"
 fi
 JAR_STALE_BY_COMMIT=0
-if [ "${JAR_MTIME:-0}" -gt 0 ] && [ "${HEAD_TS:-0}" -gt 0 ]; then
-  [ "$JAR_MTIME" -lt "$HEAD_TS" ] && JAR_STALE_BY_COMMIT=1
+if [ "${JAR_MTIME:-0}" -gt 0 ] && [ "${SRC_COMMIT_TS:-0}" -gt 0 ]; then
+  [ "$JAR_MTIME" -lt "$SRC_COMMIT_TS" ] && JAR_STALE_BY_COMMIT=1
 fi
 
 # ─────────────────────────────────────────────────────────────
 # ③ 测试记录（由 run-regression.sh 结束时写）
 # ─────────────────────────────────────────────────────────────
 LAST_RUN="$SCRIPT_DIR/.last-run.json"
-T_COMMIT=""; T_AT=""; T_SCRIPTS=""; T_PASSED=""; T_FAILED=""; T_EXIT=""; T_DIRTY=""
+T_COMMIT=""; T_AT=""; T_SCRIPTS=""; T_PASSED=""; T_FAILED=""; T_EXIT=""; T_FP=""
 
-# 当前工作区快照。必须和 run-regression.sh 里的算法**逐字符一致**（同样是
-# `git status --porcelain` + `git diff` 拼起来取 sha256 前 12 位），否则永远对不上。
-# ⚠️ 已知局限：只哈希「已跟踪文件的改动内容」和「所有改动文件名」，
-#    未跟踪文件的**内容**没进哈希（改了未跟踪文件内容不会变）——够用，但别当密码学保证。
-DIRTY_HASH="$(
-  { git status --porcelain 2>/dev/null; git diff 2>/dev/null; } | sha256sum | cut -c1-12
-)"
+# 当前「运行相关源码」指纹。算法只有一份，在 source-fingerprint.sh 里 ——
+# 这里再写一遍迟早会漂移，然后天天误报。
+SRC_FP="$(bash "$SCRIPT_DIR/source-fingerprint.sh" 2>/dev/null || echo unknown)"
 
 if [ -f "$LAST_RUN" ]; then
   # 不依赖 jq（不一定装了），用 grep + sed 取字段。
@@ -142,7 +145,7 @@ if [ -f "$LAST_RUN" ]; then
   }
   T_COMMIT="$(jget commit)"
   T_AT="$(jget runAt)"
-  T_DIRTY="$(jget dirtyHash)"
+  T_FP="$(jget sourceFingerprint)"
   T_SCRIPTS="$(jget scripts)"
   T_PASSED="$(jget passed)"
   T_FAILED="$(jget failed)"
@@ -275,17 +278,24 @@ WARN=()
 if [ -z "$JAR_TIME" ]; then
   WARN+=("本地还没有 jar，需要先 mvn package")
 elif [ "$JAR_STALE_BY_COMMIT" -eq 1 ]; then
-  WARN+=("本地 jar 一定旧：jar 是 ${JAR_TIME}，早于最后一次提交（${HEAD_TIME}）—— 逻辑上不可能包含它")
+  WARN+=("本地 jar 一定旧：jar 是 ${JAR_TIME}，早于最后一次动代码的提交（${SRC_COMMIT_TIME}）—— 逻辑上不可能包含它")
 elif [ "$NEWER_FILES" -gt 0 ] && [ "$DIRTY" -gt 0 ]; then
   WARN+=("工作区有改动，且有 ${NEWER_FILES} 个源文件比 jar 新 —— 需要重新打包")
 fi
 
 if [ -z "$T_COMMIT" ]; then
   WARN+=("没有测试记录：还没跑过 run-regression.sh")
+elif [ -n "${T_FP:-}" ] && [ "${T_FP:-}" != "unknown" ]; then
+  # 有指纹就以指纹为准 —— 它才代表「影响运行的东西变没变」。
+  # 纯文档提交不会让它变，所以测试结果不会被白白作废。
+  if [ "$T_FP" != "$SRC_FP" ]; then
+    WARN+=("运行相关源码在测试之后改过（测试时 ${T_FP}，现在 ${SRC_FP}）—— 这份结果不算数")
+  elif [ "${T_FAILED:-0}" != "0" ]; then
+    WARN+=("最近一次回归有 ${T_FAILED} 个脚本失败")
+  fi
 elif [ "$T_COMMIT" != "$GIT_HEAD" ]; then
+  # 旧记录没有指纹，才退回按 commit 比（会有一批假警报，跑一次回归就升级）
   WARN+=("测试结果是 ${T_COMMIT} 那一版跑的，与当前 HEAD ${GIT_HEAD} 不一致 —— 不可用于本次验收")
-elif [ -n "${T_DIRTY:-}" ] && [ "$T_DIRTY" != "$DIRTY_HASH" ]; then
-  WARN+=("测试之后工作区又改过（测试时快照 ${T_DIRTY}，现在 ${DIRTY_HASH}）—— 这份结果不算数")
 elif [ "${T_FAILED:-0}" != "0" ]; then
   WARN+=("最近一次回归有 ${T_FAILED} 个脚本失败")
 fi
@@ -326,10 +336,10 @@ if [ "$MODE" = "json" ]; then
     "$GIT_HEAD" "$(printf '%s' "$GIT_SUBJECT" | sed 's/"/\\"/g')" "$DIRTY"
   printf '  "scale": {"tables": %s, "endpointAnnotations": %s, "verifyScripts": %s},\n' \
     "${COUNT_TABLES:-0}" "${COUNT_ENDPOINTS:-0}" "${COUNT_SCRIPTS:-0}"
-  printf '  "build": {"jarTime": "%s", "jarSha256": "%s", "staleByCommit": %s, "newerSourceFiles": %s, "headCommitTime": "%s"},\n' \
-    "${JAR_TIME:-}" "${JAR_SHA:-}" "$JAR_STALE_BY_COMMIT" "$NEWER_FILES" "${HEAD_TIME:-}"
-  printf '  "test": {"commit": "%s", "runAt": "%s", "dirtyHash": "%s", "currentDirtyHash": "%s", "scripts": "%s", "passed": "%s", "failed": "%s", "exit": "%s"},\n' \
-    "$T_COMMIT" "$T_AT" "$T_DIRTY" "$DIRTY_HASH" "$T_SCRIPTS" "$T_PASSED" "$T_FAILED" "$T_EXIT"
+  printf '  "build": {"jarTime": "%s", "jarSha256": "%s", "staleByCommit": %s, "newerSourceFiles": %s, "headCommitTime": "%s", "sourceCommitTime": "%s"},\n' \
+    "${JAR_TIME:-}" "${JAR_SHA:-}" "$JAR_STALE_BY_COMMIT" "$NEWER_FILES" "${HEAD_TIME:-}" "${SRC_COMMIT_TIME:-}"
+  printf '  "test": {"commit": "%s", "runAt": "%s", "sourceFingerprint": "%s", "currentSourceFingerprint": "%s", "scripts": "%s", "passed": "%s", "failed": "%s", "exit": "%s"},\n' \
+    "$T_COMMIT" "$T_AT" "$T_FP" "$SRC_FP" "$T_SCRIPTS" "$T_PASSED" "$T_FAILED" "$T_EXIT"
   printf '  "remote": {"reachable": %s, "jarTime": "%s", "jarSha256": "%s", "startedAt": "%s", "service": "%s", "health": "%s"},\n' \
     "$REACHABLE" "${R_JAR_TIME:-}" "${R_JAR_SHA:-}" "${R_STARTED:-}" "${R_STATE:-}" "${R_HEALTH:-}"
   printf '  "database": {"localVersion": "%s", "localAuthColumns": "%s", "remoteVersion": "%s", "remoteAuthColumns": "%s"},\n' \
@@ -370,11 +380,11 @@ echo "② 本地构建"
 if [ -n "$JAR_TIME" ]; then
   echo "   JAR          ${JAR_TIME}   ${D}sha256 ${JAR_SHA:-?}…${N}"
   if [ "$JAR_STALE_BY_COMMIT" -eq 1 ]; then
-    echo "   与源码       ${Y}一定旧：早于最后一次提交（${HEAD_TIME}）${N}"
+    echo "   与源码       ${Y}一定旧：早于最后一次动代码的提交（${SRC_COMMIT_TIME}）${N}"
   elif [ "$NEWER_FILES" -gt 0 ]; then
     echo "   与源码       ${Y}工作区有 ${NEWER_FILES} 个源文件比 jar 新${N}"
   else
-    echo "   与源码       ${G}看起来是最新的${N}${D}（晚于最后一次提交、工作区无更新）${N}"
+    echo "   与源码       ${G}看起来是最新的${N}${D}（晚于最后一次动代码的提交、工作区无更新）${N}"
   fi
 else
   echo "   JAR          ${Y}不存在（还没 mvn package）${N}"
@@ -389,17 +399,20 @@ else
   T_AT_SHOW="$(printf '%s' "$T_AT" | sed 's/T/ /; s/:[0-9][0-9][-+].*$//')"
   echo "   上次运行     ${T_AT_SHOW:-未知}"
   echo "   结果         ${T_PASSED:-?}/${T_SCRIPTS:-?} 通过，失败 ${T_FAILED:-?}（退出码 ${T_EXIT:-?}）"
-  if [ "$T_COMMIT" = "$GIT_HEAD" ]; then
-    echo "   对应 commit  ${T_COMMIT}  ${G}与当前 HEAD 一致${N}"
+  if [ -n "${T_FP:-}" ] && [ "${T_FP:-}" != "unknown" ]; then
+    if [ "$T_FP" = "$SRC_FP" ]; then
+      echo "   源码指纹     ${T_FP}  ${G}与现在一致${N}"
+      if [ "$T_COMMIT" != "$GIT_HEAD" ]; then
+        echo "   对应 commit  ${T_COMMIT}  ${D}当前 HEAD ${GIT_HEAD}，之后只动了文档/元数据 —— 结果仍有效${N}"
+      fi
+    else
+      echo "   源码指纹     ${T_FP}  ${R}与现在（${SRC_FP}）不一致 —— 这份结果不算数${N}"
+    fi
+  elif [ "$T_COMMIT" = "$GIT_HEAD" ]; then
+    echo "   对应 commit  ${T_COMMIT}  ${G}与当前 HEAD 一致${N}${D}（旧记录没有指纹）${N}"
   else
-    echo "   对应 commit  ${T_COMMIT}  ${R}与当前 HEAD ${GIT_HEAD} 不一致 —— 这份结果不算数${N}"
-  fi
-  if [ -z "${T_DIRTY:-}" ]; then
-    echo "   工作区快照   ${D}旧记录没有这一项（下次跑回归会补上）${N}"
-  elif [ "$T_DIRTY" = "$DIRTY_HASH" ]; then
-    echo "   工作区快照   ${T_DIRTY}  ${G}与现在一致${N}"
-  else
-    echo "   工作区快照   ${T_DIRTY}  ${R}与现在（${DIRTY_HASH}）不一致 —— 这份结果不算数${N}"
+    echo "   对应 commit  ${T_COMMIT}  ${Y}与当前 HEAD ${GIT_HEAD} 不一致${N}"
+    echo "   ${D}旧记录没有源码指纹，只能按 commit 判；跑一次回归就升级了${N}"
   fi
 fi
 
