@@ -1,7 +1,7 @@
 # 全局约定：第二课堂学时答疑工单系统
 
-> 从 `MEMORY.md` 拆出来的（2026-09-29，为了压 MEMORY.md 的体量）。
-> 动鉴权 / 编号 / 健康检查 / 事务相关的代码前，先读这一份。
+> **本文是工程约定的唯一来源。** 动鉴权 / 编号 / 健康检查 / 事务相关的代码前，先读这一份。
+> 业务规则见 `MODULES.md`，环境与部署见 `ENVIRONMENT.md`，协作方式见 `PROCESS.md`。
 
 ## 分层与拦截器
 
@@ -13,7 +13,7 @@
     这就是"加前端"的第一个必改项（很容易卡半天）。
   - 放行静态资源 ≠ 开后门：那些文件里没有任何敏感信息，数据全靠 `/api/**`，而 `/api/**` 仍然全拦。
   - **断言要成对写**：每条"放行"断言都配一条"对应 API 仍 401"。只测"页面能开"是不够的 ——
-    万一 exclude 手滑写成 `/**`，页面照样能开，但整个系统就裸奔了（`target/verify-frontend.py` 就是照这个思路写的）。
+    万一 exclude 手滑写成 `/**`，页面照样能开，但整个系统就裸奔了（`verify/verify-frontend.py` 就是照这个思路写的）。
 - 用户 id **一律从 Token 取**；标记他人资源 **404 而非 403**。
 - 校验顺序统一：**角色 → 归属 → 状态前置 → 乐观锁**。
 - 🔴 **乐观锁 `version` 必传的只有 5 个接口**：`confirm` / `close` / `admin-close`（三者共用 `closeOrder`）
@@ -75,7 +75,7 @@
   HikariCP `connection-timeout: 3000`（默认 30s 会架空探活）。
 - 失败返 HTTP 503 + `Result(500,...)`。
 - ⚠️ **第一次探活要 3~5 秒**（Lettuce 首连开销；对照：关掉 Redis 探活首次仅 412ms，预热后都是 10ms）
-  ⇒ 验证脚本 `target/verify-health.py` 三档（`default`/`redis-down`/`redis-off`）已拆成
+  ⇒ 验证脚本 `verify/verify-health.py` 三档（`default`/`redis-down`/`redis-off`）已拆成
   「首次兜底 <8s」+「预热后连打 5 次 <500ms」。
 
 ## 🔴 Redis 使用铁律（⑧）

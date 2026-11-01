@@ -1,6 +1,7 @@
-# 模块级业务规则（配合 MEMORY.md 使用）
+# 模块级业务规则
 
-> 由模型维护。MEMORY.md 超体量上限，故把"具体模块"的规则挪到这里，**动某模块前先读本文件**。
+> **动某个模块之前，先读对应小节。** 这里是业务规则的唯一来源，不依赖仓库外的文件；
+> 工程约定见 `CONVENTIONS.md`，环境与部署约束见 `ENVIRONMENT.md`。
 
 ## 一、工单主流程
 - 三类日志表：`t_status_log`=状态流转；`t_notification_log`=推给谁（通知+红点）；`t_operation_log`=谁干了什么。
@@ -20,7 +21,7 @@
   - 副作用：`t_merge_relation` 1 条（`UNIQUE(sub_order_id)` 兜底）+ `t_status_log.action='MERGE'` + 审计 `MERGE`（**target_id=子单号**、操作人=**执行合并的人**，不是子单提交人）+ 两条 SYSTEM 消息（子单「工单已合并至 {主单}」/ 主单「工单 {子单} 已合并至此」）+ 通知子单提交人（**`target_id`=主单号**、`work_order_id`=子单号、title「您的工单已合并」）。**`is_repeat` / `duplicate_of_order_id` 不碰**。
   - ⚠️ **没有幂等**：请求体只有 `mainOrderId` + `version`（见 `WorkOrderMergeRequest`），塞 `requestId` 会被**完全忽略**。
   - 合并后子单锁死：`reply` / `close` / `admin-close` / `accept` 四种全 **409**。
-  - 回归：`target/verify-merge.py`（**62 条**，2026-10-10 补 —— 此前这个接口**从没进过回归**）。探查脚本 `target/probe-merge.py`。
+  - 回归：`verify/verify-merge.py`（**62 条**，2026-10-10 补 —— 此前这个接口**从没进过回归**）。探查脚本 `（该探查脚本已丢失）`。
 
 ## 二、N 附件
 - `POST /api/upload`（5MB + **Magic Number** 校验 + 图片长边 ≤1920px）。`GET /api/files/{id}` 是**文档没有的**、**第一个"成功时不返 `Result`"**的接口（文档假设用 OSS）。
@@ -65,7 +66,7 @@
 
 ## 八、故意没做 / 技术债
 - ✅ **「回复」「追问」的敏感词检测已补**（2026-10-11）—— 用户拍板：**标记打在工单上 + 放行不拦截**，详见 §五。
-- ✅ **§4 第 5 步 jieba 重复检测已补**（2026-10-14）—— 7 条口径（未完结三态 / 平手取最新 / 停用词+单字+短ASCII / 内容<8跳过 / 池 LIMIT 200 / **交集≥2 且 交集÷新单词数≥40%** / 吞异常绝不拦提交），只提示不拦截。`duplicate_of_order_id` 由恒 NULL → 真实写入；下游三处（提交返回体 `isDuplicate`、#50 `isDuplicate` 筛选、统计 `duplicateRate`）**从"死的"变"活的"**。验证 `target/verify-duplicate.py`（**54 条，自校验 oracle 口径**）。契约回填 `doc.txt` 统一修订项**第 21 条**。
+- ✅ **§4 第 5 步 jieba 重复检测已补**（2026-10-14）—— 7 条口径（未完结三态 / 平手取最新 / 停用词+单字+短ASCII / 内容<8跳过 / 池 LIMIT 200 / **交集≥2 且 交集÷新单词数≥40%** / 吞异常绝不拦提交），只提示不拦截。`duplicate_of_order_id` 由恒 NULL → 真实写入；下游三处（提交返回体 `isDuplicate`、#50 `isDuplicate` 筛选、统计 `duplicateRate`）**从"死的"变"活的"**。验证 `verify/verify-duplicate.py`（**54 条，自校验 oracle 口径**）。契约回填 `doc.txt` 统一修订项**第 21 条**。
   - 🔴 **口径本质 = 比"字面共享多少实词"，不是"是不是同一件事"**。→ 已拍板「暂不修」的**已知限制**：`热水机` 切成 `热水+机坏`、`热水器` 切成 `热水器` ⇒ 同义反而**交集 0**（属**漏报**，不会误拦）。治本要换字符二元组或补近义词表，成本高且 54 条断言全要重验。详见 `doc.txt` 第 21 条末段。
   - ⚠️ **写 requests.http 的 D 组时踩过**：我按"我觉得像"写断言，实际算法按"实词共享"判 —— **同一坑第 7 次**。D 组的近义对必须**换虚词、不换实词**（`连续三天`对`连着三天`、`扣款了`对`把钱扣了`）。
 - ✅ **XSS 口径已定**（2026-10-14 用户拍板）：**渲染期转义**，后端**刻意不做**任何入库转义 ⇒ 见 §十一「XSS」小节。
@@ -192,7 +193,7 @@
 - ⚠️ Redis 挂时这四个接口直接 500（消息「幂等校验失败：Redis 不可用…」），**不静默降级** ——
   降级等于偷偷放行重复提交。
 - 手工验证：`requests.http` 的 **E 组**（E1 提交 → E2 同参重放单号相同 → E3 换内容 409 → E4 新 ID → E5 不传）。
-  自动验证：`target/verify-idempotent.py <端口> default|redis-down`。
+  自动验证：`verify/verify-idempotent.py <端口> default|redis-down`。
 
 ## 十、⑧ Redis 其余细节（敏感词缓存 / 登出黑名单 / 单号 / 健康检查）
 - **敏感词缓存**（⑧⑤，`SensitiveWordService`）：key `sensitive_words:cache`，Redis **SET**，成员 = 所有 ACTIVE 词，
@@ -205,7 +206,7 @@
     删掉则下次读从库重装，**永远安全**。且**挂在 `afterCommit`**（`TransactionSynchronizationManager`）——
     否则"事务没提交时别的请求重装了旧数据 + 30min TTL"这个窗口会让缓存错到 TTL 到期。
   - 三个失效点：`addWord`（`outcome != EXISTS` 时）、`batchAdd`（`added > 0` 时）、`disableWord`（总是）。
-  - 验证：`target/verify-sensitive-cache.py <端口> default|redis-down`（default 28 / redis-down 5）。
+  - 验证：`verify/verify-sensitive-cache.py <端口> default|redis-down`（default 28 / redis-down 5）。
     三条"看得见实现"的断言：把库改脏但不动缓存 → 仍判命中（证明读缓存）；禁用后 key 立刻消失 + 紧接提交不命中（立即生效）；
     把 cache key 写成 STRING（WRONGTYPE）→ 仍成功且判定正确（降级生效）。
 - **登出黑名单**（⑧④，`common/TokenBlacklist`，接口 `add`/`contains` 没变）：
@@ -226,7 +227,7 @@
   **不查库、不写第二遍审计**。理由：拿已作废的 Token 再作废一次结果相同，本来就该成功；
   回 401 属于"用错误码把已达成目标报成失败"。
   手工验证：`requests.http` **B 组**（B4 已改为期望 `code=0`）；
-  自动：`target/verify-blacklist.py <端口> default|redis-down`（**19 + 6 条**）。
+  自动：`verify/verify-blacklist.py <端口> default|redis-down`（**19 + 6 条**）。
   redis-down 档靠 `--spring.data.redis.port=6399`（无人监听）模拟，
   断言「不全站 500 / **登出依然成功**但会话确实被终止（内存兜底）/ 审计行不增加」。
 - **手工看 Redis 的小工具**：`python target/redis-cli.py [-h 主机] [-p 端口] <命令>...`（纯标准库手搓 RESP，本机 redis-server 没带 redis-cli）。
@@ -448,7 +449,7 @@
   - ⚠️ **断言写法教训**：「清筛选发生在设提示语之前」这条原来写成"提示语前 400 个字符内有没有"，
     加了注释后距离涨到 414 字就误报了。已改成 `rfind(..., 0, _idx) > 0`（窗口无关，永不误报）。
 
-验证：`target/verify-frontend.py`（**365 条**），回归 18 个脚本 **1004 条断言 FAIL=0**。
+验证：`verify/verify-frontend.py`（**365 条**），回归 18 个脚本 **1004 条断言 FAIL=0**。
 学生端 + 干事端已完成；**下一步：管理端操作**（`admin-close` 强制关闭待接单 / `merge` 合并工单）。
 
 - ✅ 第十步 —— **管理端「强制关闭」`admin-close`**（学生端 + 干事端 + 管理端全部收口）。
@@ -480,13 +481,13 @@
     `requestId:`（带冒号）＋请求体字面量。
     同理之前踩过固定字符窗口的坑 —— **文本型断言要盯着"我要的那个东西"，而不是"这个词"**。
 
-验证：`target/verify-frontend.py`（**428 条**，+63），回归 18 个脚本 **1067 条断言 FAIL=0**（`REGRESSION OK`）。
+验证：`verify/verify-frontend.py`（**428 条**，+63），回归 18 个脚本 **1067 条断言 FAIL=0**（`REGRESSION OK`）。
 
 - ✅ 第十一步 —— **合并重复工单 `merge`**（管理端最后一块写操作；**干事 + 管理员共用**）。
   用户拍板三件事：**先补接口验证再写界面**、**详情页里就地搜索选中主单**、**主单可以是已完结单但界面给提醒**。
   - 🔴 **先补的窟窿**：`merge` 的后端**早就写完了**（接口阶段 51/51 里就有），但它**从来没进过回归**
-    —— `target/` 下没有 `verify-workorder.py`，18 个脚本里也没有它。本轮新建 `target/verify-merge.py`
-    （**62 条**）并加进 `run-regression.sh`（全套 18 → **19** 个脚本）。探查脚本 `target/probe-merge.py`。
+    —— `target/` 下没有 `verify-workorder.py`，18 个脚本里也没有它。本轮新建 `verify/verify-merge.py`
+    （**62 条**）并加进 `run-regression.sh`（全套 18 → **19** 个脚本）。探查脚本 `（该探查脚本已丢失）`。
     ⚠️ **纠正过一个错前提**：我先前汇报说"管理端只剩 merge 要做"，隐含"后端还没写" —— 是错的。
   - 🔴 **前端入口**：新增 `mergeCardHtml(d)`，作为 `actionCardHtml` 的**第四段**
     （`student + staff + admin + merge`）。**它是唯一同时服务两个角色的段** ——
@@ -515,8 +516,8 @@
     ⇒ 改成查**请求体字面量** + `requestId:`（带冒号）。
     **教训（已第三次）**：写文本型断言前先自问"这句话在注释里会不会出现"。
 
-验证：`target/verify-frontend.py`（**490 条**，+29），回归 **19 个脚本 1191 条断言 FAIL=0**（`REGRESSION OK`）。
-**管理端的写操作到此全部收口**（admin-close + merge）。剩下的都属"待用户拍板"项（见 §八 与 MEMORY.md）。
+验证：`verify/verify-frontend.py`（**490 条**，+29），回归 **19 个脚本 1191 条断言 FAIL=0**（`REGRESSION OK`）。
+**管理端的写操作到此全部收口**（admin-close + merge）。剩下的都属"待用户拍板"项（见 §八；待办清单以 `SESSION.md` 为准）。
 
 - ✅ 第十二步 —— **公告对游客（未登录）开放**（用户原话："公告不登录也能看"）。
   - 🔴 **起因是"两边不一致"**：后端 `JwtInterceptor.OPTIONAL_AUTH_PREFIXES` **早就把
@@ -547,7 +548,7 @@
     公告 `code=0`；游客条数 **≤** 管理员；FAQ 列表 + **详情** `code=0`；
     工单列表不带 Token → **401**（证明没把别的接口一起放开）。
 
-验证：`target/verify-frontend.py`（**490 → 507 条**，+17，第二十五节 19 条）；
+验证：`verify/verify-frontend.py`（**490 → 507 条**，+17，第二十五节 19 条）；
 全套回归 **19 个脚本 1208 条断言 FAIL=0**（`REGRESSION OK`，2026-10-10）。
   （2026-10-11 加了 jti 后 → **1215 条**，见 §十二。）
 
