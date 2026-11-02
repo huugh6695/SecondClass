@@ -14,9 +14,9 @@
 import {
   api, getToken, setToken, clearToken, getDeviceToken, setDeviceToken,
   requestBlob, saveBlob
-} from './api.js?v=20261107';
+} from './api.js?v=20261111';
 // 标题区的点线背景动画（单独一个文件：canvas 绘制逻辑和页面渲染没关系，混进来只会更难读）
-import { mountPlexus, destroyPlexus } from './plexus.js?v=20261107';
+import { mountPlexus, destroyPlexus } from './plexus.js?v=20261111';
 
 /* ---------- 全局状态：整个前端就这一个"记事本" ---------- */
 
@@ -1517,7 +1517,9 @@ async function onPagerClick(e) {
 function listHeadHtml() {
   const isStaff = state.me.role === 'STAFF';
   const isAdmin = state.me.role === 'ADMIN';
-  const eyebrow = isStaff ? '服务台工作区' : (isAdmin ? '全局管理视图' : '学生服务台');
+  // 学生端的小标题用英文（用户指定 SERVICE DESK）；客服/管理端仍是中文，
+  // 要不要一起换英文等用户拍板 —— 三处同一位置混着语言会显得不一致。
+  const eyebrow = isStaff ? '服务台工作区' : (isAdmin ? '全局管理视图' : 'SERVICE DESK');
   const subtitle = isStaff
     ? '接单、回复并跟进学生问题，让每一次处理都有迹可循。'
     : (isAdmin ? '查看全量工单，及时掌握服务进度与处理情况。'
