@@ -1476,7 +1476,9 @@ button, input, select, textarea { font: inherit; }
 .center-wrap {
   position: relative;
   min-height: 100vh;
-  padding: 28px;
+  /* 四周留白就是这张卡片「浮在页面上」的呼吸感。
+     原来是 28px，1080 宽的屏上几乎顶到边，看着像整页糊了一张大板。 */
+  padding: 32px 40px;
   overflow: hidden;
   background:
     radial-gradient(circle at 5% 2%, rgba(36, 99, 223, .12), transparent 34rem),
@@ -1512,8 +1514,10 @@ button, input, select, textarea { font: inherit; }
   z-index: 1;
   display: grid;
   grid-template-columns: minmax(0, 1.08fr) minmax(390px, .92fr);
-  width: min(1110px, 100%);
-  min-height: min(720px, calc(100vh - 56px));
+  /* 原来 1110 × 720：在 1080×720 的屏上宽高两头都顶满，只剩一条细缝，
+     于是变成一块「满屏的大板」而不是一张卡。收窄 + 压矮后四周都有余量。 */
+  width: min(1040px, 100%);
+  min-height: min(600px, calc(100vh - 96px));
   overflow: hidden;
   border: 1px solid rgba(255, 255, 255, .8);
   border-radius: 28px;
@@ -1665,27 +1669,39 @@ button, input, select, textarea { font: inherit; }
 
 .login-panel {
   display: flex;
+  /* 竖排：表单卡 → 无需登录也能查看。竖排才能让「常见问题」落到卡片**下方**，
+     而不是塞进卡片里当最后一段。 */
+  flex-direction: column;
   align-items: center;
   justify-content: center;
-  padding: 56px 52px;
+  gap: 16px;
+  /* 上下 20px：1080×720 的小屏上，整块（外壳 + 页面留白）刚好压在视口内，
+     不会再挤出一条竖向滚动条。 */
+  padding: 20px 40px;
   background:
     linear-gradient(180deg, rgba(249, 251, 255, .56), rgba(255, 255, 255, .96) 28%),
     #fff;
 }
 
+/* 表单本身是一张独立的白卡（参考她给的样张：白底、大圆角、柔和投影）。
+   ⚠️ 这里必须是「有圆角的卡」——上一版为了消掉"贴截图感"把边框圆角全清了，
+   结果表单和底板糊成一整片，反而没有层次。 */
 .login-panel .login-card {
   width: 100%;
   max-width: 404px;
-  padding: 0;
-  border: 0;
-  border-radius: 0;
-  box-shadow: none;
+  padding: 26px 30px 18px;
+  border: 1px solid #e8eef6;
+  border-radius: 24px;
+  background: #fff;
+  box-shadow:
+    0 18px 42px rgba(23, 43, 77, .10),
+    0 2px 6px rgba(23, 43, 77, .04);
 }
 
 .login-mobile-brand { display: none; }
 
 .login-heading {
-  margin-bottom: 32px;
+  margin-bottom: 18px;
 }
 
 /* ⚠️ 登录页的排版规则必须带 .login-card 限定。
@@ -1703,24 +1719,24 @@ button, input, select, textarea { font: inherit; }
 }
 
 .login-card .login-heading .sub {
-  margin: 10px 0 0;
+  margin: 8px 0 0;
   color: var(--text-2);
-  font-size: 14.5px;
-  line-height: 1.62;
+  font-size: 14px;
+  line-height: 1.55;
 }
 
 .login-card .field label {
-  margin-bottom: 9px;
+  margin-bottom: 8px;
   color: #415169;
   font-size: 13px;
   font-weight: 650;
 }
 
-.login-card .field { margin-bottom: 20px; }
+.login-card .field { margin-bottom: 13px; }
 
 .login-card .input {
-  min-height: 52px;
-  padding: 13px 15px;
+  min-height: 48px;
+  padding: 11px 14px;
   border-color: #d8e1ed;
   border-radius: 12px;
   font-size: 15px;
@@ -1737,8 +1753,8 @@ button, input, select, textarea { font: inherit; }
 }
 
 .login-card .login-submit {
-  min-height: 52px;
-  margin-top: 8px;
+  min-height: 48px;
+  margin-top: 6px;
   border-radius: 12px;
   font-size: 15.5px;
   font-weight: 650;
@@ -1751,16 +1767,16 @@ button, input, select, textarea { font: inherit; }
 }
 
 .login-assist {
-  margin-top: 28px;
-  padding-top: 22px;
+  margin-top: 14px;
+  padding-top: 12px;
   border-top: 1px solid #e8edf5;
 }
 
 .login-assist .login-hint {
   margin: 0 0 9px;
   color: #6b788b;
-  font-size: 12.5px;
-  line-height: 1.7;
+  font-size: 11.5px;
+  line-height: 1.5;
 }
 
 .login-assist .login-hint:last-child { margin-bottom: 0; }
@@ -2173,7 +2189,7 @@ select.input {
   .login-points { grid-template-columns: 1fr; }
   .login-point small { white-space: normal; }
   .login-point:nth-child(n+2) { display: none; }
-  .login-panel { padding: 42px 36px; }
+  .login-panel { padding: 30px 28px; }
 }
 
 @media (max-width: 720px) {
@@ -2218,15 +2234,25 @@ select.input {
 
   .login-panel {
     align-items: flex-start;
-    padding: 0;
+    padding: 0 0 26px;
     background: #fff;
   }
 
+  /* 手机上整页铺满，白卡和底板就没分界了 —— 圆角、描边、投影全部收掉 */
   .login-panel .login-card {
     max-width: none;
-    padding: 28px 24px 34px;
+    padding: 26px 24px 22px;
+    border: 0;
     border-radius: 0;
+    box-shadow: none;
   }
+
+  .login-guest {
+    max-width: none;
+    padding: 0 24px;
+  }
+
+  .login-guest-title { text-align: left; }
 
   .login-mobile-brand {
     display: flex;
@@ -3239,55 +3265,50 @@ body {
   background: rgba(255, 255, 255, .45);
 }
 
-/* 登录页：左侧深蓝故事面板保持不动，只把右侧表单区做成玻璃。
-   ⚠️ 这里刻意「只做一层」，两个坑都别踩回去：
-   ① 早先给 .login-panel 设了近乎透明的白、又给里面的 .login-card 补了
-      半透明白 + 大阴影；而原规则里 .login-card 是 border:0 / border-radius:0
-      ⇒ 等于一个**没有圆角的方块 + 一圈软阴影**，看着就像把一张截图贴在右边。
-   ② 玻璃必须「有东西可透」：外层 .login-shell 原来是纯白底，白底上做磨砂
-      只会得到一片更白的白。所以 shell 改透明，让页面的环境光斑透上来。
-   现在的关系是：shell 透明 → panel 一层玻璃 → 表单直接放在玻璃上，不套第二层。 */
+/* 登录页：左侧深蓝故事面板保持不动，右侧做「毛玻璃底板 + 一张白色表单卡」。
+   ⚠️ 两层关系的分工，别踩回两头的坑：
+   ① 只做玻璃、不套卡（上一版）：表单和底板糊成一整片，右侧没有层次，
+      加上整块板顶满屏幕，看着就像把一张截图贴在右边。
+   ② 玻璃 + 卡，但卡忘了圆角（更早那一版）：一个没圆角的方块顶着一圈软阴影，
+      同样像贴图。
+   现在：shell 透明 → panel 一层冷白玻璃（有东西可透）→ 白卡浮在玻璃上。
+   白卡能立住的前提是 glass 比它暗一档，所以 panel 用**冷调**半透明而不是纯白。 */
 .login-shell {
   border-color: rgba(255, 255, 255, .85);
-  border-radius: 30px;
+  border-radius: 28px;
   background: transparent;
 }
 
 .login-panel {
-  background: rgba(255, 255, 255, .55);
-  -webkit-backdrop-filter: blur(22px) saturate(1.5);
-  backdrop-filter: blur(22px) saturate(1.5);
+  background:
+    linear-gradient(158deg,
+      rgba(236, 242, 251, .72) 0%,
+      rgba(245, 249, 254, .58) 58%,
+      rgba(255, 255, 255, .46) 100%);
+  -webkit-backdrop-filter: blur(24px) saturate(1.45);
+  backdrop-filter: blur(24px) saturate(1.45);
   /* 左侧一道内高光：和深蓝板交界处是一根干净的亮线，而不是硬切一刀 */
   box-shadow:
-    inset 1px 0 0 rgba(255, 255, 255, .6),
+    inset 1px 0 0 rgba(255, 255, 255, .62),
     inset 0 1px 0 rgba(255, 255, 255, .7);
 }
 
-/* 表单自己不再是一张卡片：底色/边框/阴影全清掉，只留排版 */
-.login-panel .login-card {
-  background: none;
-  border: 0;
-  box-shadow: none;
-}
-
-/* 输入框在白玻璃上要更实一点，否则边框和底色都糊在一起 */
-.login-panel .input {
-  background: rgba(255, 255, 255, .82);
-}
-
-/* ---------- 「无需登录也能查看」两块入口 ---------- */
+/* ---------- 「无需登录也能查看」两块入口 ----------
+   位置：表单卡**下方**的玻璃底板上，不在卡里。
+   层级关系是「一张主卡（表单）+ 两张次卡（入口）」，靠尺寸和白度区分，
+   不用再加分隔线 —— 玻璃上画横线会显得脏。 */
 .login-guest {
-  margin-top: 20px;
-  padding-top: 18px;
-  border-top: 1px solid rgba(23, 43, 77, .10);
+  width: 100%;
+  max-width: 404px;
 }
 
 .login-guest-title {
-  margin: 0 0 12px;
-  color: #4f5f75;
-  font-size: 13px;
+  margin: 0 0 8px;
+  color: #55657c;
+  font-size: 12.5px;
   font-weight: 600;
   letter-spacing: .02em;
+  text-align: center;
 }
 
 .login-guest-links {
@@ -3300,12 +3321,12 @@ body {
   display: flex;
   flex-direction: column;
   gap: 4px;
-  padding: 13px 15px;
+  padding: 10px 13px;
   /* 边框用浅蓝灰而不是白色：浅底上用白边框等于没有边框，卡片会糊成一片 */
-  border: 1px solid rgba(23, 43, 77, .10);
-  border-radius: 13px;
-  background: rgba(255, 255, 255, .78);
-  box-shadow: 0 2px 9px rgba(23, 43, 77, .05), inset 0 1px 0 rgba(255, 255, 255, .9);
+  border: 1px solid rgba(23, 43, 77, .09);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, .92);
+  box-shadow: 0 6px 16px rgba(23, 43, 77, .06), inset 0 1px 0 #fff;
   color: var(--text);
   font: inherit;
   text-align: left;
@@ -3428,5 +3449,48 @@ body {
   .brand-title::after {
     animation: none;
     opacity: 0;
+  }
+}
+
+/* ---------- 矮屏兜底（1366×768 这类：去掉浏览器工具条约剩 640~660 高）----------
+   整块（外壳 645 + 上下留白）在 720 高的视口里刚好压住，再矮就放不下了。
+   而 .center-wrap 一直是 overflow: hidden —— 放不下不是"滚动"，是**直接被裁**，
+   表单下半截会凭空消失。所以只在矮屏放开滚动：
+   · safe center 不能省：普通 center 在内容超高时会把顶部溢出到不可滚动区，
+     用户往上滚也滚不到（flex 居中的经典坑）；
+   · 角落那两个装饰圆弧在矮屏上直接关掉，它们是绝对定位负偏移，
+     留着会把自己算进滚动区域，凭空多出一截可滚的空白。 */
+@media (max-height: 700px) {
+  .center-wrap {
+    align-items: safe center;
+    overflow-y: auto;
+    padding-top: 18px;
+    padding-bottom: 18px;
+  }
+
+  .center-wrap::before,
+  .center-wrap::after { display: none; }
+}
+
+/* ---------- 手机（≤720）：整页铺满，不再需要「浮在玻璃上」的效果 ----------
+   ⚠️ 这条必须放在文件最末尾。
+   屏幕媒体查询（约 2220 行）写在玻璃层（约 3260 行）**前面**，
+   同权重、后者生效 ⇒ 只在前面那条里写 background: #fff 是盖不住玻璃渐变的，
+   结果是「渐变底的玻璃面板 + 一个没圆角的白方块」，交接处一道生硬的接缝。
+   手机上的形态本来就是贴边铺满，所以这里把它明确改回白底 + 表单透明。 */
+@media (max-width: 720px) {
+  .login-panel {
+    padding: 0 0 26px;
+    background: #fff;
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+    box-shadow: none;
+  }
+
+  .login-panel .login-card {
+    background: transparent;
+    border: 0;
+    border-radius: 0;
+    box-shadow: none;
   }
 }

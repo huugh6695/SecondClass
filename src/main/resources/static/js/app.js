@@ -708,24 +708,26 @@ function viewLogin() {
                   预置账号初次登录密码为<strong>学号后 6 位</strong>；自助注册账号使用自己设置的密码。
                 </p>
               </div>
-              <!-- 「无需登录也能看」两个入口：原来只是底部一行 12px 小字，
-                   在登录页里几乎看不见。改成两块并排的入口卡（标题 + 一句说明），
-                   尺寸和权重都抬起来，但仍压在主表单之下，不抢「登录」这个主动作。 -->
-              <div class="login-guest">
-                <p class="login-guest-title">无需登录也能查看</p>
-                <div class="login-guest-links">
-                  <button class="login-guest-item" id="login-see-faq" type="button">
-                    <strong>常见问题</strong>
-                    <small>学时规则与常见疑问</small>
-                  </button>
-                  <button class="login-guest-item" id="login-see-ann" type="button">
-                    <strong>查看公告</strong>
-                    <small>服务通知与更新</small>
-                  </button>
-                </div>
-              </div>
             `}
           </div>
+          <!-- 「无需登录也能看」两个入口：放在**表单卡下方**的玻璃底板上。
+               放在卡里会把它挤成一张越来越长的竖长条，卡片高度也就跟着虚高；
+               挪出来之后是「一张主卡 + 两张次卡」，主次清楚、高度也收住。
+               短信验证那一步不显示：避免在夹着验证码的当口把人带去别的页面。 -->
+          ${challenge ? '' : `
+          <div class="login-guest">
+            <p class="login-guest-title">无需登录也能查看</p>
+            <div class="login-guest-links">
+              <button class="login-guest-item" id="login-see-faq" type="button">
+                <strong>常见问题</strong>
+                <small>学时规则与常见疑问</small>
+              </button>
+              <button class="login-guest-item" id="login-see-ann" type="button">
+                <strong>查看公告</strong>
+                <small>服务通知与更新</small>
+              </button>
+            </div>
+          </div>`}
         </section>
       </div>
     </div>`;
