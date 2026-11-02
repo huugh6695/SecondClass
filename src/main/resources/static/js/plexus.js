@@ -17,7 +17,7 @@
 
 const LINK_DISTANCE = 120;   // 超过这个距离就不连线（px）
 const LINE_ALPHA = 0.22;     // 连线最浓时的透明度
-const DOT_ALPHA = 0.50;      // 圆点透明度
+const DOT_ALPHA = 0.52;      // 圆点透明度
 const BLUE = '36, 99, 223';  // 品牌蓝
 const TEAL = '19, 164, 143'; // 品牌青
 
@@ -60,19 +60,17 @@ export function mountPlexus(host) {
     canvas.height = Math.round(height * dpr);
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 
-    // 点数跟着面积走：每 1700 平方像素一个点，10~46 之间。
-    // 分母调小 = 点变密。这块画布被 CSS 限制在标题尺寸（约 460×110），
-    // 按 2600 只摊到 17 个点，看着像零散噪点；1700 大约 30 个点，
-    // 右侧才有足够的点让边缘自然淡出，而不是"线走到一半突然没了"。
-    // 下限给小屏留的：手机上一块 170px 宽的画布如果硬塞十几个点，
-    // 加上 120px 的连线距离，会织成一张又密又亮的网，压过标题。
-    const count = Math.max(10, Math.min(46, Math.round((width * height) / 1700)));
+    // 点数按**宽度**算：每 20px 一个点，20~70 之间。
+    // （早先是按面积 /1300，画布收窄后虽然密度不低，但整片网只剩标题旁边一小块；
+    //   现在画布铺满标题行，按宽度算能让网均匀铺开，/20 比方案稿的 /26 再密一点。）
+    // 下限给小屏留的：手机上标题行只有 ~330px，20 个点刚好够成一张网。
+    const count = Math.max(20, Math.min(70, Math.round(width / 20)));
     points = Array.from({ length: count }, () => ({
       x: Math.random() * width,
       y: Math.random() * height,
       vx: (Math.random() - 0.5) * 0.24,
       vy: (Math.random() - 0.5) * 0.24,
-      r: 1 + Math.random() * 1.1,
+      r: 1.2 + Math.random() * 1.1,
       color: Math.random() > 0.78 ? TEAL : BLUE
     }));
   }

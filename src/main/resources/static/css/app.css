@@ -3087,13 +3087,15 @@ select.input {
 }
 
 /* 关键①：铺一层"光影底色"。磨砂卡片透出来的就是这几团颜色，
-   没有它们，玻璃只会是一片灰白。 */
+   没有它们，玻璃只会是一片灰白。
+   2026-11-02：按反馈把底色整体压深一档（原来 #edf2fb→#f6f8fc 太寡淡，
+   点线在近乎纯白的底上几乎看不出来），同时把三团光斑的浓度也各提了一点。 */
 body {
   background:
-    radial-gradient(46rem 46rem at 6% -12%, rgba(36, 99, 223, .16), transparent 62%),
-    radial-gradient(40rem 40rem at 108% 8%, rgba(19, 164, 143, .13), transparent 58%),
-    radial-gradient(44rem 44rem at 50% 118%, rgba(122, 92, 250, .11), transparent 62%),
-    linear-gradient(180deg, #edf2fb, #f6f8fc);
+    radial-gradient(46rem 46rem at 6% -12%, rgba(36, 99, 223, .20), transparent 62%),
+    radial-gradient(40rem 40rem at 108% 8%, rgba(19, 164, 143, .16), transparent 58%),
+    radial-gradient(44rem 44rem at 50% 118%, rgba(122, 92, 250, .13), transparent 62%),
+    linear-gradient(180deg, #e4ecf8, #eff4fa);
 }
 
 /* 关键②：壳级元素上磨砂 */
@@ -3356,27 +3358,27 @@ body {
   position: absolute;
   top: -8px;
   left: -16px;
+  /* 铺满整个标题行（和 glass-preview 方案稿一致）：
+     早些时候为了"别跑到标题右边去"把宽度收成 460px，结果网变成标题旁边的
+     一小块补丁 —— 那个"跑偏"其实是脚本量错父元素导致的，宽度本身没问题。
+     ⚠️ 宽度必须写成 calc(100% + 16px)，不能靠 left+right 撑：
+     canvas 是替换元素，同时给 left/right 时它仍用固有宽度（300px），
+     right 直接被忽略 —— 和下面那条高度是同一个坑。 */
   right: auto;
+  width: calc(100% + 16px);
   /* ⚠ 高度必须显式写，不能用 top+bottom 撑：
      canvas 和 <img> 一样自带固有宽高比（默认 300×150 = 2:1），
-     只给 width 而不给 height 时，浏览器会按"宽度 × 0.5"算高度 ——
-     440 宽的画布就变成 220 高，比标题块高一倍，网往下糊到副标题上。
-     这里 height 直接对齐标题块（100%）再上下各多 8px。 */
+     只给宽度不给高度时浏览器会按"宽度 × 0.5"算高度，
+     一张 900 宽的画布就变成 450 高，网往下糊到副标题上。 */
   height: calc(100% + 16px);
-  /* 宽度收在标题这一侧：
-     标题块（.page-heading）是 flex:1，横跨整行，
-     如果画布也铺满整行，点数一稀释，线就全跑到右边空白处去了
-     —— 看着像"标题旁边有一团网"，而不是"线从字底下穿过"。
-     注意：这里的宽度是画布尺寸的唯一来源，js/plexus.js 只按这个框
-     分配像素、不会再用内联样式覆盖它，所以调大小改这里就行。 */
-  width: min(460px, 62%);
   z-index: 0;
   display: block;
   pointer-events: none;
-  /* 边缘柔化：浓的一团压在标题文字上（横向 21% ≈ "我的工单"四个字的位置），
-     往右逐级淡出，线别在画布边界被硬切掉 */
-  -webkit-mask-image: radial-gradient(58% 100% at 20% 54%, #000 30%, rgba(0, 0, 0, .45) 68%, transparent 100%);
-  mask-image: radial-gradient(58% 100% at 20% 54%, #000 30%, rgba(0, 0, 0, .45) 68%, transparent 100%);
+  /* 画布变宽后，"浓"的区域要跟着往左挪：标题字形只占整行最左边约 15%，
+     所以圆心定 26%、半径按"到右边缘刚好淡成 0"反推（74%）。
+     46% 以内是全不透明的，往右逐级淡出 —— 整个标题行都有网，右边不硬切。 */
+  -webkit-mask-image: radial-gradient(74% 130% at 26% 52%, #000 46%, rgba(0, 0, 0, .5) 78%, transparent 100%);
+  mask-image: radial-gradient(74% 130% at 26% 52%, #000 46%, rgba(0, 0, 0, .5) 78%, transparent 100%);
 }
 
 /* ---------- 品牌标题扫光 ----------
