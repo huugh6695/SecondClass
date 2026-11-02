@@ -15,7 +15,7 @@
     否则用户浏览器会用缓存里的旧文件 —— 服务器明明更新了，看到却是旧界面。
     三处要一起改：①本文件 css 的 ?v  ②本文件 js 的 ?v  ③ js/app.js 里 import './api.js?v=...'
   -->
-  <link rel="stylesheet" href="css/app.css?v=20261107">
+  <link rel="stylesheet" href="css/app.css?v=20261111">
 </head>
 <body>
 
@@ -36,6 +36,6 @@
     type="module" 是浏览器原生支持的 ES 模块，**不需要任何打包/构建工具**。
     所以这个前端没有 npm、没有 webpack、没有构建步骤 —— 改完直接刷新浏览器就能看到效果。
   -->
-  <script type="module" src="js/app.js?v=20261107"></script>
+  <script type="module" src="js/app.js?v=20261111"></script>
 </body>
 </html>
