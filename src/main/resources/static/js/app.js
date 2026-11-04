@@ -2301,10 +2301,14 @@ function staffActionCardHtml(d) {
             <select class="input" id="s-tpl" disabled>
               <option value="">模板加载中…</option>
             </select>
+            <button class="btn ai-btn" id="s-ai-btn" type="button">AI 建议</button>
           </div>
           <textarea class="input s-reply-input" id="s-reply" maxlength="1000"
                     placeholder="例如：学时将在 3 个工作日内录入，请留意。"></textarea>
           <div class="counter"><span id="s-reply-count">0</span> / 1000</div>
+          <!-- AI 建议的结果说明（来源、耗时、失败原因）。默认隐藏，点按钮后才出现。
+               注意：它只是**说明**，正文直接填进上面的回复框，干事可以随便改。 -->
+          <div class="ai-panel" id="s-ai-panel" hidden></div>
         </div>
         <div class="row">
           <button class="btn btn-primary" id="s-reply-btn" type="button">发送回复</button>
@@ -2672,6 +2676,7 @@ async function onDetailClick(e) {
   // ⑤ 干事：接单 / 回复 / 完结 / 退回
   if (e.target.closest('#s-accept')) { await onAccept(); return; }
   if (e.target.closest('#s-reply-btn')) { await onReply(); return; }
+  if (e.target.closest('#s-ai-btn')) { await onAiSuggestion(); return; }
   if (e.target.closest('#s-close')) { await onCloseOrder(); return; }
   if (e.target.closest('#s-return')) { await onReturnOrder(); return; }
 
@@ -2851,6 +2856,64 @@ async function onAccept() {
   setNotice('ok', r.message || '受理成功');
   // 重载：状态变「处理中」、进度条往前走、处理人显示我的名字、操作区换成"回复"那一套
   await loadDetail(state.detailId);
+}
+
+/**
+ * 干事端「AI 建议」：取一张草稿填进回复框。
+ *
+ * 三条设计上的自我约束：
+ * 1. **只填框，不发送**。填完干事还能改，发送仍走原来的 onReply()。
+ * 2. `mode === 'SEARCH_ONLY'`（没开 AI / 没密钥 / 模型挂了）**不是错误**：
+ *    后端照样返回 code=0 和相关 FAQ，这里照常填、只是把原因说明白。
+ * 3. 正文用 value 赋值（不是 innerHTML），来源列表一律过 esc() —— 后端内容也算不可信输入。
+ */
+async function onAiSuggestion() {
+  const btn = document.getElementById('s-ai-btn');
+  const panel = document.getElementById('s-ai-panel');
+  const ta = document.getElementById('s-reply');
+  if (!btn || !ta || !state.detailId) return;
+
+  const oldText = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = '生成中…';
+  if (panel) { panel.hidden = true; panel.innerHTML = ''; }
+
+  const r = await api.aiSuggestion(state.detailId);
+
+  btn.disabled = false;
+  btn.textContent = oldText;
+
+  if (r.needLogin) { state.me = null; render(); return; }
+  if (!r.ok) { setNotice('error', r.message || 'AI 建议生成失败'); return; }
+
+  const d = r.data || {};
+  const suggestion = (d.suggestion || '').trim();
+  if (!suggestion) {
+    setNotice('warn', '这次没生成出内容，你可以先按模板写，或稍后再试。');
+    return;
+  }
+
+  // 填进回复框，并把字数计数器同步刷新（否则计数器还停在 0，看着像没填上）
+  ta.value = suggestion;
+  ta.dispatchEvent(new Event('input', { bubbles: true }));
+
+  if (!panel) return;
+  const isAi = d.mode === 'AI';
+  const src = (d.sources || []).map(function (s) {
+    return '<li><b>' + esc(s.faqId) + '</b> ' + esc(s.question) + '</li>';
+  }).join('');
+
+  panel.innerHTML =
+    '<div class="ai-tag ' + (isAi ? 'ai-tag-ai' : 'ai-tag-search') + '">'
+      + (isAi ? 'AI 草稿 · 已填入回复框，请核对后发送' : '未调用 AI · 以下为相关 FAQ 拼接')
+    + '</div>'
+    + (d.reason ? '<div class="ai-reason">' + esc(d.reason) + '</div>' : '')
+    + (src ? '<div class="ai-src-title">依据的常见问题</div><ul class="ai-src">' + src + '</ul>'
+           : '<div class="ai-reason">没有检索到相关的常见问题，这段内容请重点核对。</div>')
+    + '<div class="ai-meta">'
+      + (d.model ? '模型 ' + esc(d.model) + ' · ' : '')
+      + '耗时 ' + (d.elapsedMs || 0) + ' ms</div>';
+  panel.hidden = false;
 }
 
 /** 干事回复（插一条 REPLY 消息 + 状态 → REPLIED）。 */

@@ -495,6 +495,19 @@ export const api = {
   },
 
   /**
+   * 干事端「AI 回复建议」。**只生成草稿，不发送、不写库、不改状态**。
+   * 成功时 data = { workOrderId, mode, reason, suggestion, sources[], elapsedMs, model }。
+   *
+   * mode 有两种，前端都要能显示：
+   *   AI          —— 真模型生成的草稿
+   *   SEARCH_ONLY —— 没调模型（未开启/没配密钥/模型挂了），suggestion 是相关 FAQ 答案的拼接
+   * 这两种**都是 code=0**：辅助功能不可用不算业务失败，不要按错误提示用户。
+   */
+  aiSuggestion(id) {
+    return request('POST', '/api/work-orders/' + encodeURIComponent(id) + '/ai-suggestion', {});
+  },
+
+  /**
    * 干事手动完结 → 工单关闭（CLOSED，同时写 finish_time）。**不可逆**。
    * 成功时 data = { workOrderId, status, statusLabel, action: 'MANUAL_CLOSE',
    *                finishTime, version }。

@@ -92,6 +92,15 @@ app:
     ip-hourly-limit: 30
     device-trust-days: 180
 
+  # 干事端 AI 回复建议。默认关闭：没配密钥时应用照常启动，只是没有这个辅助按钮。
+  # 要开启：设 AI_ENABLED=true + AI_API_KEY=<密钥>（可选 AI_BASE_URL / AI_MODEL）。
+  ai:
+    enabled: ${AI_ENABLED:false}
+    base-url: ${AI_BASE_URL:https://api.deepseek.com}
+    api-key: ${AI_API_KEY:}
+    model: ${AI_MODEL:deepseek-flash}
+    timeout-seconds: ${AI_TIMEOUT_SECONDS:20}
+
   upload:
     # 🔴 必须是**绝对路径**。用 systemd 托管时，进程的工作目录不是你放 jar 的目录，
     #    相对路径 `./uploads` 会落到 /var/lib/... 之类意想不到的地方，甚至没写权限直接报错。

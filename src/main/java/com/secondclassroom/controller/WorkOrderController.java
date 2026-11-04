@@ -2,6 +2,7 @@ package com.secondclassroom.controller;
 
 import com.secondclassroom.common.IdempotencyStore;
 import com.secondclassroom.common.Result;
+import com.secondclassroom.dto.AiSuggestionResponse;
 import com.secondclassroom.dto.WorkOrderAcceptRequest;
 import com.secondclassroom.dto.WorkOrderAcceptResult;
 import com.secondclassroom.dto.WorkOrderCloseRequest;
@@ -23,6 +24,7 @@ import com.secondclassroom.dto.WorkOrderReturnResult;
 import com.secondclassroom.dto.WorkOrderSubmitRequest;
 import com.secondclassroom.dto.WorkOrderSubmitResult;
 import com.secondclassroom.service.WorkOrderService;
+import com.secondclassroom.service.AiSuggestionService;
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -48,6 +50,7 @@ import org.springframework.web.bind.annotation.RestController;
  * - POST   /api/work-orders/{id}/merge       合并重复工单（子工单 → MERGED 终态）
  * - POST   /api/work-orders/{id}/re-consult  再次咨询（基于已完结单再开一张新单，7 天限 1 次）
  * - POST   /api/work-orders/{id}/messages/read 把该工单的消息全部标为已读（同事务清两种红点）
+ * - POST   /api/work-orders/{id}/ai-suggestion 干事端 AI 回复建议（仅 STAFF/ADMIN，只出草稿不发出去）
  */
 @RestController
 @RequestMapping("/api/work-orders")
@@ -63,9 +66,13 @@ public class WorkOrderController {
      */
     private final IdempotencyStore idempotencyStore;
 
-    public WorkOrderController(WorkOrderService workOrderService, IdempotencyStore idempotencyStore) {
+    private final AiSuggestionService aiSuggestionService;
+
+    public WorkOrderController(WorkOrderService workOrderService, IdempotencyStore idempotencyStore,
+                               AiSuggestionService aiSuggestionService) {
         this.workOrderService = workOrderService;
         this.idempotencyStore = idempotencyStore;
+        this.aiSuggestionService = aiSuggestionService;
     }
 
     /**
@@ -133,6 +140,23 @@ public class WorkOrderController {
                 userId, "REPLY", workOrderId, req.getContent());
         return idempotencyStore.run(req.getRequestId(), fingerprint, WorkOrderReplyResult.class,
                 "回复成功", () -> workOrderService.reply(userId, userType, workOrderId, req));
+    }
+
+    /**
+     * POST /api/work-orders/{workOrderId}/ai-suggestion —— 干事端 AI 回复建议。
+     *
+     * ⚠️ 语义边界（很重要）：
+     * - **只生成草稿，不发送、不落库、不改工单状态**。回复仍然要走上面的 /reply。
+     * - 仅 STAFF / ADMIN 可调；学生调一律 403。
+     * - AI 不可用时也返回 `code=0`，`data.mode=SEARCH_ONLY` + 相关 FAQ，
+     *   前端照常展示即可 —— 辅助功能不承担"报错"的职责。
+     */
+    @PostMapping("/{workOrderId}/ai-suggestion")
+    public Result<AiSuggestionResponse> aiSuggestion(HttpServletRequest request,
+                                                    @PathVariable String workOrderId) {
+        String userId = (String) request.getAttribute("userId");
+        String userType = (String) request.getAttribute("userType");
+        return aiSuggestionService.suggest(userId, userType, workOrderId);
     }
 
     /**

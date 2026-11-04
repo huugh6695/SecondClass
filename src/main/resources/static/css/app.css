@@ -1043,6 +1043,29 @@ textarea.input.adm-batch-input {
 /* 详情页回复卡上的「插入模板」下拉 */
 .tpl-row { margin-bottom: 8px; }
 
+/* ---------- 干事端「AI 建议」 ---------- */
+
+/* 按钮和下拉同一行，靠右、不抢戏：它是辅助动作，主按钮仍是「发送回复」 */
+.ai-btn { flex: 0 0 auto; white-space: nowrap; }
+
+.ai-panel {
+  margin-top: 10px;
+  padding: 10px 12px;
+  border: 1px dashed var(--border-strong);
+  border-radius: 10px;
+  background: var(--surface-soft);
+  font-size: 12.5px;
+  line-height: 1.65;
+}
+.ai-tag { font-weight: 600; margin-bottom: 4px; }
+.ai-tag-ai { color: var(--primary-dark); }
+.ai-tag-search { color: var(--warn); }
+.ai-reason { color: #5b6884; margin-bottom: 4px; }
+.ai-src-title { color: var(--text); font-weight: 600; margin: 6px 0 2px; }
+.ai-src { margin: 0; padding-left: 18px; color: #5b6884; }
+.ai-src li { margin: 1px 0; }
+.ai-meta { margin-top: 6px; color: #8590a6; font-size: 12px; }
+
 /* ---------- 数据统计页 ---------- */
 
 .stats-presets { gap: 8px; flex-wrap: wrap; }
