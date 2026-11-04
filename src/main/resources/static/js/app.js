@@ -14,9 +14,9 @@
 import {
   api, getToken, setToken, clearToken, getDeviceToken, setDeviceToken,
   requestBlob, saveBlob
-} from './api.js?v=20261112';
+} from './api.js?v=20261105';
 // 标题区的点线背景动画（单独一个文件：canvas 绘制逻辑和页面渲染没关系，混进来只会更难读）
-import { mountPlexus, destroyPlexus } from './plexus.js?v=20261112';
+import { mountPlexus, destroyPlexus } from './plexus.js?v=20261105';
 
 /* ---------- 全局状态：整个前端就这一个"记事本" ---------- */
 
