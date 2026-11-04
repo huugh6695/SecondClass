@@ -72,7 +72,14 @@ jwt:
 
 app:
   sms:
-    provider: ${SMS_PROVIDER:webhook}
+    # 🔴 默认 log：只把验证码写进服务器日志，不真发短信。
+    #    2026-11-04 线上踩过坑 —— 这里原先默认 webhook，而 webhook-url 默认是空，
+    #    WebhookSmsSender 的 @PostConstruct 直接抛
+    #    「SMS_PROVIDER=webhook 时必须配置 SMS_WEBHOOK_URL」，
+    #    结果是**整个应用起不来**（不是短信不可用，是全站打不开），
+    #    连「只改前端样式」这种部署都会被拖死。默认值必须指向「不需要外部依赖」的实现。
+    #    接通真网关时：设 SMS_PROVIDER=webhook + SMS_WEBHOOK_URL（+ SMS_WEBHOOK_TOKEN）。
+    provider: ${SMS_PROVIDER:log}
     expose-dev-code: false
     webhook-url: ${SMS_WEBHOOK_URL:}
     webhook-token: ${SMS_WEBHOOK_TOKEN:}

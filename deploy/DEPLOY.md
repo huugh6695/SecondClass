@@ -470,6 +470,37 @@ save ""
 
 ## 8. 打包并上传
 
+### 8.0 先问一句：这一版要不要改表？
+
+**新 jar 的代码可能要求数据库有新的表 / 字段，而「jar 换了」不会自动帮你建。**
+漏做这一步的症状很迷惑：应用能起来，但一用到某个功能就报 `Unknown column 'xxx'`。
+
+先看 `deploy/` 下有哪些 `migrate-*.sql`，再核对线上库到底执行过没有：
+
+```bash
+# 台账里有什么
+mysql -t second_classroom -e "SELECT version, applied_at FROM t_schema_version ORDER BY applied_at;"
+```
+
+**2026-11-04 这一版**（学生自助注册 + 手机号认证）需要的两个脚本，按顺序执行：
+
+```bash
+# ① 先备份！46KB 的库也是一整个学期的数据
+mysqldump --single-transaction --routines second_classroom > /srv/backup/sc-$(date +%Y%m%d-%H%M).sql
+
+# ② 加字段（幂等性：只能在没加过的库上跑一次）
+mysql second_classroom < deploy/migrate-auth-registration.sql
+
+# ③ 建版本台账表（可重复执行）
+mysql second_classroom < deploy/migrate-schema-version.sql
+```
+
+要加的东西：`t_user` 的 `phone_ciphertext` / `phone_hash` / `phone_last4` /
+`phone_verified_at` / `token_version` 五列 + 唯一索引 `uk_user_phone_hash`，外加 `t_schema_version` 表。
+
+> 🔴 **顺序不能反**：先备份 → 再迁移 → 最后换 jar。
+> 反过来会变成「新代码已经跑在有旧结构的库上」，用户点一下就报错，且分不清是代码问题还是库问题。
+
 ### 8.1 在 Windows 上打 jar
 
 **最稳的方式（避开 `mvnw` 的老毛病）：** 在 IDEA 右侧 **Maven** 面板 → `Lifecycle` → 双击 **`package`**。
@@ -525,16 +556,29 @@ nano /etc/second-classroom/env
 `deploy/README-auth-registration.md`：
 
 ```conf
+# —— 三项必填，缺任一应用直接起不来（故意的）——
 DB_PASSWORD=你§6.2设的那个密码
 JWT_SECRET=刚 openssl 生成的那串
 UPLOAD_DIR=/srv/second-classroom/uploads
-SMS_PROVIDER=webhook
-SMS_WEBHOOK_URL=https://你的短信网关/send
-SMS_WEBHOOK_TOKEN=短信网关访问令牌
+
+# —— 短信：没有真网关就先写 log ——
+#   log    = 验证码只写进 /var/log/second-classroom，不真发短信（当前线上就是这档）
+#   webhook = 真发，此时 SMS_WEBHOOK_URL 必填；没填应用会在启动自检时抛错退出
+SMS_PROVIDER=log
+# SMS_WEBHOOK_URL=https://你的短信网关/send
+# SMS_WEBHOOK_TOKEN=短信网关访问令牌
+
+# —— 可选：不写就复用 JWT_SECRET；建议独立生成，免得换 JWT 时把已存手机号解不开 ——
 SMS_PHONE_ENCRYPTION_KEY=独立生成的第二串随机值
 SMS_PHONE_HASH_SECRET=独立生成的第三串随机值
-SMS_EXPOSE_DEV_CODE=false
 ```
+
+> 🔴 **2026-11-04 踩过的坑**：`application-prod.yml` 里 `provider` 的默认值原本是 `webhook`，
+> 而 `webhook-url` 默认空 ⇒ 启动自检抛「SMS_PROVIDER=webhook 时必须配置 SMS_WEBHOOK_URL」，
+> **整个应用起不来**（不是短信不可用，是全站打不开），害得一次「只改前端样式」的部署
+> 连续回滚。默认值已改成 `log`；但**反过来的坑也要记住**：将来接通真网关时，
+> 如果只改了 URL 忘了把 `SMS_PROVIDER` 改成 `webhook`，验证码会**静默只写日志**、
+> 用户永远收不到 —— 部署完务必用真手机号走一遍「注册 → 收码」。
 
 ```bash
 chown root:root /etc/second-classroom/env
