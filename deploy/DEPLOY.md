@@ -571,6 +571,15 @@ SMS_PROVIDER=log
 # —— 可选：不写就复用 JWT_SECRET；建议独立生成，免得换 JWT 时把已存手机号解不开 ——
 SMS_PHONE_ENCRYPTION_KEY=独立生成的第二串随机值
 SMS_PHONE_HASH_SECRET=独立生成的第三串随机值
+
+# —— 可选：干事端「AI 回复建议」——
+#   默认 false，不配也能正常跑（只是没有那个按钮）。
+#   开启后模型只用「检索到的 FAQ」做参考，AI 挂了会降级成"只列相关 FAQ"，不影响主流程。
+AI_ENABLED=false
+# AI_ENABLED=true 时再填这三行：
+# AI_API_KEY=你的密钥
+# AI_BASE_URL=https://api.deepseek.com
+# AI_MODEL=deepseek-flash
 ```
 
 > 🔴 **2026-11-04 踩过的坑**：`application-prod.yml` 里 `provider` 的默认值原本是 `webhook`，
